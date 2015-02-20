@@ -39,6 +39,7 @@ extern "C" {
 #include "h2o/linklist.h"
 #include "h2o/http1client.h"
 #include "h2o/memory.h"
+#include "h2o/multithread.h"
 #include "h2o/socket.h"
 #include "h2o/string_.h"
 #include "h2o/time_.h"
@@ -192,9 +193,9 @@ typedef struct st_h2o_protocol_callbacks_t {
 
 struct st_h2o_globalconf_t {
     /**
-     * list of host contexts (h2o_hostconf_t)
+     * a NULL-terminated list of host contexts (h2o_hostconf_t)
      */
-    H2O_VECTOR(h2o_hostconf_t) hosts;
+    h2o_hostconf_t **hosts;
     /**
      * list of configurators
      */
@@ -267,6 +268,10 @@ struct st_h2o_context_t {
      * pointer to the global configuration
      */
     h2o_globalconf_t *globalconf;
+    /**
+     * queue for receiving messages from other contexts
+     */
+    h2o_multithread_queue_t *queue;
     /**
      * flag indicating if shutdown has been requested
      */
@@ -399,6 +404,10 @@ struct st_h2o_conn_t {
      * the context of the server
      */
     h2o_context_t *ctx;
+    /**
+     * NULL-terminated list of hostconfs bound to the connection
+     */
+    h2o_hostconf_t **hosts;
     /**
      * peername (peername.addr == NULL if not available)
      */
@@ -559,7 +568,7 @@ ssize_t h2o_delete_header(h2o_headers_t *headers, ssize_t cursor);
 /**
  * accepts a SSL connection
  */
-void h2o_accept_ssl(h2o_context_t *ctx, h2o_socket_t *sock, SSL_CTX *ssl_ctx);
+void h2o_accept_ssl(h2o_context_t *ctx, h2o_hostconf_t **hosts, h2o_socket_t *sock, SSL_CTX *ssl_ctx);
 
 /* request */
 
@@ -821,9 +830,8 @@ void h2o_file_register_configurator(h2o_globalconf_t *conf);
 
 typedef struct st_h2o_proxy_config_vars_t {
     uint64_t io_timeout;
-    int use_keepalive;
     int preserve_host;
-    uint64_t keepalive_timeout;
+    uint64_t keepalive_timeout; /* in milliseconds; set to zero to disable keepalive */
 } h2o_proxy_config_vars_t;
 
 typedef struct st_h2o_proxy_location_t {

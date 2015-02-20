@@ -3,11 +3,11 @@ H2O - an optimized HTTP server with support for HTTP/1.x and HTTP/2
 
 [![Build Status](https://travis-ci.org/h2o/h2o.svg?branch=master)](https://travis-ci.org/h2o/h2o)
 
-Copyright (c) 2014,2015 [DeNA Co., Ltd.](http://dena.com/), [Kazuho Oku](https://github.com/kazuho/), [Tatsuhiko Kubo](https://github.com/cubicdaiya/), [Domingo Alvarez Duarte](https://github.com/mingodad/), [Nick Desaulniers](https://github.com/nickdesaulniers/), [Marc Hörsken](https://github.com/mback2k), [Masahiro Nagano](https://github.com/kazeburo/)
+Copyright (c) 2014,2015 [DeNA Co., Ltd.](http://dena.com/), [Kazuho Oku](https://github.com/kazuho/), [Tatsuhiko Kubo](https://github.com/cubicdaiya/), [Domingo Alvarez Duarte](https://github.com/mingodad/), [Nick Desaulniers](https://github.com/nickdesaulniers/), [Marc Hörsken](https://github.com/mback2k), [Masahiro Nagano](https://github.com/kazeburo/), Jeff Marrison
 
 H2O is a very fast HTTP server written in C.  It can also be used as a library.
 
-This is the README for H2O version 0.9.3-alpha1 (HEAD).
+This is the README for H2O version 1.0.1-alpha1 (HEAD).
 
 ### License
 
@@ -22,7 +22,7 @@ Includes third-party softwares (also licensed under the MIT license): [klib](htt
  - persistent connections
  - chunked encoding
 - [HTTP/2](http://http2.github.io/)
- - draft 16 (and draft 14 to support older clients)
+ - supports the final version, draft 14 and 16
  - negotiation methods: NPN, ALPN, Upgrade, direct
  - dependency and weight-based prioritization
  - server push
@@ -34,7 +34,7 @@ Includes third-party softwares (also licensed under the MIT license): [klib](htt
  - forward secrecy
  - AEAD ciphers
  - OCSP stapling (automatically enabled)
- - session resumption (internal memory)
+ - session resumption and session tickets (internal memory)
 - static file serving
  - conditional GET using last-modified / etag
  - directory listing
@@ -56,7 +56,7 @@ Following softwares are required to build the standalone server.  It is likely t
 
 - [cmake](http://www.cmake.org/)
 - [libyaml](http://pyyaml.org/wiki/LibYAML)
-- [OpenSSL](https://www.openssl.org/) (1.0.2 or above is recommended)
+- [OpenSSL](https://www.openssl.org/) (1.0.2 is mandatory to use HTTP/2 with some web browsers)
 
 Download and extract a source release from [here](https://github.com/h2o/h2o/releases), or clone the Git repository.
 

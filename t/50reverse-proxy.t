@@ -38,28 +38,11 @@ hosts:
     paths:
       /:
         proxy.reverse.url: http://127.0.0.1:$upstream_port
-        proxy.keepalive: @{[ $h2o_keepalive ? "ON" : "OFF" ]}
+@{[ $h2o_keepalive ? "" : "        proxy.timeout.keepalive: 0" ]}
 EOT
     };
     ok ! check_port($upstream_port), "upstream should be down now";
 }
-
-# should return 502 in case of upstream error
-subtest 'upstream-down' => sub {
-    plan skip_all => 'curl not found'
-        unless prog_exists('curl');
-    my $upstream_port = empty_port();
-    my $server = spawn_h2o(<< "EOT");
-hosts:
-  default:
-    paths:
-      /:
-        proxy.reverse.url: http://127.0.0.1:$upstream_port
-EOT
-    my $port = $server->{port};
-    my $res = `curl --silent --dump-header /dev/stderr http://127.0.0.1:$port/ 2>&1 > /dev/null`;
-    like $res, qr{^HTTP/1\.1 502 }, "502 response on upstream error";
-};
 
 sub spawn_upstream {
     my ($port, @extra) = @_;
@@ -112,11 +95,11 @@ sub run_tests_with_conf {
                 like $content, qr{^location: $proto://127.0.0.1:$port/abc\r$}m;
             };
             subtest "x-forwarded ($proto)" => sub {
-                my $resp = `curl --silent --insecure --dump-header /dev/stderr $proto://127.0.0.1:$port/echo 2>&1 > /dev/null`;
-                like $resp, qr/^x-req-x-forwarded-for: 127\.0\.0\.1\r$/mi, "x-forwarded-for";
-                like $resp, qr/^x-req-x-forwarded-proto: $proto\r$/mi, "x-forwarded-proto";
-                $resp = `curl --silent --insecure --header 'X-Forwarded-For: 127.0.0.2' --dump-header /dev/stderr $proto://127.0.0.1:$port/echo 2>&1 > /dev/null`;
-                like $resp, qr/^x-req-x-forwarded-for: 127\.0\.0\.2, 127\.0\.0\.1\r$/mi, "x-forwarded-for (append)";
+                my $resp = `curl --silent --insecure $proto://127.0.0.1:$port/echo-headers`;
+                like $resp, qr/^x-forwarded-for: 127\.0\.0\.1$/mi, "x-forwarded-for";
+                like $resp, qr/^x-forwarded-proto: $proto$/mi, "x-forwarded-proto";
+                $resp = `curl --silent --insecure --header 'X-Forwarded-For: 127.0.0.2' $proto://127.0.0.1:$port/echo-headers`;
+                like $resp, qr/^x-forwarded-for: 127\.0\.0\.2, 127\.0\.0\.1$/mi, "x-forwarded-for (append)";
             };
         };
         $doit->('http', $port);
@@ -127,8 +110,7 @@ sub run_tests_with_conf {
         plan skip_all => 'nghttp not found'
             unless prog_exists('nghttp');
         my $doit = sub {
-            my ($proto, $port) = @_;
-            my $opt = $proto eq 'http' ? '-u' : '';
+            my ($proto, $opt, $port) = @_;
             for my $file (sort keys %files) {
                 my $content = `nghttp $opt $proto://127.0.0.1:$port/$file`;
                 is length($content), $files{$file}->{size}, "$proto://127.0.0.1/$file (size)";
@@ -141,14 +123,23 @@ sub run_tests_with_conf {
             $out = `nghttp $opt -H':method: POST' -d $huge_file $proto://127.0.0.1:$port/echo`;
             is length($out), $huge_file_size, "$proto://127.0.0.1/echo (mmap-backed, size)";
             is md5_hex($out), $huge_file_md5, "$proto://127.0.0.1/echo (mmap-backed, md5)";
+            subtest 'cookies' => sub {
+                plan skip_all => 'nghttp issues #161'
+                    if $opt eq '-u';
+                $out = `nghttp $opt -H 'cookie: a=b' -H 'cookie: c=d' $proto://127.0.0.1:$port/echo-headers`;
+                like $out, qr{^cookie: a=b; c=d$}m;
+            };
         };
-        subtest 'http' => sub {
-            $doit->('http', $port);
+        subtest 'http (upgrade)' => sub {
+            $doit->('http', '-u', $port);
+        };
+        subtest 'http (direct)' => sub {
+            $doit->('http', '', $port);
         };
         subtest 'https' => sub {
             plan skip_all => 'OpenSSL does not support protocol negotiation; it is too old'
                 unless openssl_can_negotiate();
-            $doit->('https', $tls_port);
+            $doit->('https', '', $tls_port);
         };
     };
 }

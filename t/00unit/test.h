@@ -40,7 +40,7 @@ typedef struct st_h2o_loopback_conn_t {
     h2o_req_t req;
 } h2o_loopback_conn_t;
 
-h2o_loopback_conn_t *h2o_loopback_create(h2o_context_t *ctx);
+h2o_loopback_conn_t *h2o_loopback_create(h2o_context_t *ctx, h2o_hostconf_t **hosts);
 void h2o_loopback_destroy(h2o_loopback_conn_t *conn);
 void h2o_loopback_run_loop(h2o_loopback_conn_t *conn);
 
@@ -48,6 +48,7 @@ extern h2o_loop_t *test_loop;
 
 char *sha1sum(const void *src, size_t len);
 
+void test_lib__multithread_c(void);
 void test_lib__serverutil_c(void);
 void test_lib__string_c(void);
 void test_lib__time_c(void);

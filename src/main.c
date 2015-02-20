@@ -1,5 +1,7 @@
 /*
- * Copyright (c) 2014 DeNA Co., Ltd.
+ * Copyright (c) 2014,2015 DeNA Co., Ltd., Kazuho Oku, Tatsuhiko Kubo,
+ *                         Domingo Alvarez Duarte, Nick Desaulniers,
+ *                         Jeff Marison
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -53,12 +55,6 @@
 /* simply use a large value, and let the kernel clip it to the internal max */
 #define H2O_SOMAXCONN (65536)
 
-struct listener_configurator_t {
-    h2o_configurator_t super;
-    size_t num_global_listeners;
-    size_t num_host_listeners;
-};
-
 struct listener_ssl_config_t {
     H2O_VECTOR(h2o_iovec_t) hostnames;
     char *certificate_file;
@@ -79,11 +75,13 @@ struct listener_config_t {
     int fd;
     struct sockaddr_storage addr;
     socklen_t addrlen;
+    h2o_hostconf_t **hosts;
     H2O_VECTOR(struct listener_ssl_config_t) ssl;
 };
 
 struct listener_ctx_t {
     h2o_context_t *ctx;
+    h2o_hostconf_t **hosts;
     SSL_CTX *ssl_ctx;
     h2o_socket_t *sock;
 };
@@ -99,9 +97,14 @@ static struct {
     struct listener_config_t **listeners;
     size_t num_listeners;
     struct passwd *running_user; /* NULL if not set */
+    char *pid_file;
     int max_connections;
     size_t num_threads;
-    pthread_t *thread_ids;
+    struct {
+        pthread_t tid;
+        h2o_context_t ctx;
+        h2o_multithread_receiver_t server_notifications;
+    } *threads;
     volatile sig_atomic_t shutdown_requested;
     struct {
         /* unused buffers exist to avoid false sharing of the cache line */
@@ -116,6 +119,7 @@ static struct {
     NULL, /* listeners */
     0,    /* num_listeners */
     NULL, /* running_user */
+    NULL, /* pid_file */
     1024, /* max_connections */
     0,    /* initialized in main() */
     NULL, /* thread_ids */
@@ -123,8 +127,13 @@ static struct {
     {},   /* state */
 };
 
-/* list of signals blocked, and caught by sigwait(2) called from the main thread */
-static sigset_t sigs_blocked;
+static void set_cloexec(int fd)
+{
+    if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
+        perror("failed to set FD_CLOEXEC");
+        abort();
+    }
+}
 
 static unsigned long openssl_thread_id_callback(void)
 {
@@ -258,7 +267,7 @@ static void *ocsp_updater_thread(void *_ssl_conf)
 
     assert(ssl_conf->ocsp_stapling.interval != 0);
 
-    while (!h2o_thread_is_notified()) {
+    while (1) {
         /* sleep until next_at */
         if ((now = time(NULL)) < next_at) {
             time_t sleep_secs = next_at - now;
@@ -564,13 +573,19 @@ static struct listener_config_t *find_listener(struct sockaddr *addr, socklen_t 
     return NULL;
 }
 
-static struct listener_config_t *add_listener(int fd, struct sockaddr *addr, socklen_t addrlen)
+static struct listener_config_t *add_listener(int fd, struct sockaddr *addr, socklen_t addrlen, int is_global)
 {
     struct listener_config_t *listener = h2o_mem_alloc(sizeof(*listener));
 
     memcpy(&listener->addr, addr, addrlen);
     listener->fd = fd;
     listener->addrlen = addrlen;
+    if (is_global) {
+        listener->hosts = NULL;
+    } else {
+        listener->hosts = h2o_mem_alloc(sizeof(listener->hosts[0]));
+        listener->hosts[0] = NULL;
+    }
     memset(&listener->ssl, 0, sizeof(listener->ssl));
     conf.listeners = h2o_mem_realloc(conf.listeners, sizeof(*conf.listeners) * (conf.num_listeners + 1));
     conf.listeners[conf.num_listeners++] = listener;
@@ -619,13 +634,14 @@ static int open_unix_listener(h2o_configurator_command_t *cmd, yoml_t *node, str
         }
     }
     /* add new listener */
-    if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1 || fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 ||
-        bind(fd, (void *)sun, sizeof(*sun)) != 0 || listen(fd, H2O_SOMAXCONN) != 0) {
+    if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1 || bind(fd, (void *)sun, sizeof(*sun)) != 0 ||
+        listen(fd, H2O_SOMAXCONN) != 0) {
         if (fd != -1)
             close(fd);
         h2o_configurator_errprintf(NULL, node, "failed to listen to socket:%s: %s", sun->sun_path, strerror(errno));
         return -1;
     }
+    set_cloexec(fd);
 
     return fd;
 }
@@ -637,7 +653,7 @@ static int open_tcp_listener(h2o_configurator_command_t *cmd, yoml_t *node, cons
 
     if ((fd = socket(domain, type, protocol)) == -1)
         goto Error;
-    fcntl(fd, F_SETFD, FD_CLOEXEC);
+    set_cloexec(fd);
     { /* set reuseaddr */
         int flag = 1;
         if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) != 0)
@@ -675,14 +691,8 @@ Error:
 
 static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
 {
-    struct listener_configurator_t *configurator = (void *)cmd->configurator;
     const char *hostname = NULL, *servname = NULL, *type = "tcp";
     yoml_t *ssl_node = NULL;
-
-    if (ctx->hostconf == NULL)
-        ++configurator->num_global_listeners;
-    else
-        ++configurator->num_host_listeners;
 
     /* fetch servname (and hostname) */
     switch (node->type) {
@@ -750,11 +760,13 @@ static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_co
                 if ((fd = open_unix_listener(cmd, node, &sun)) == -1)
                     return -1;
             }
-            listener = add_listener(fd, (struct sockaddr *)&sun, sizeof(sun));
+            listener = add_listener(fd, (struct sockaddr *)&sun, sizeof(sun), ctx->hostconf == NULL);
             listener_is_new = 1;
         }
         if (listener_setup_ssl(cmd, ctx, node, ssl_node, listener, listener_is_new) != 0)
             return -1;
+        if (listener->hosts != NULL && ctx->hostconf != NULL)
+            h2o_append_to_null_terminated_list((void *)&listener->hosts, ctx->hostconf);
 
     } else if (strcmp(type, "tcp") == 0) {
 
@@ -792,11 +804,13 @@ static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_co
                                                 ai->ai_addr, ai->ai_addrlen)) == -1)
                         return -1;
                 }
-                listener = add_listener(fd, ai->ai_addr, ai->ai_addrlen);
+                listener = add_listener(fd, ai->ai_addr, ai->ai_addrlen, ctx->hostconf == NULL);
                 listener_is_new = 1;
             }
             if (listener_setup_ssl(cmd, ctx, node, ssl_node, listener, listener_is_new) != 0)
                 return -1;
+            if (listener->hosts != NULL && ctx->hostconf != NULL)
+                h2o_append_to_null_terminated_list((void *)&listener->hosts, ctx->hostconf);
         }
         /* release res */
         freeaddrinfo(res);
@@ -812,49 +826,51 @@ static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_co
 
 static int on_config_listen_enter(h2o_configurator_t *_configurator, h2o_configurator_context_t *ctx, yoml_t *node)
 {
-    struct listener_configurator_t *configurator = (void *)_configurator;
-
-    /* bail-out unless at host-level */
-    if (ctx->hostconf == NULL || ctx->pathconf != NULL)
-        return 0;
-
-    configurator->num_host_listeners = 0;
     return 0;
 }
 
 static int on_config_listen_exit(h2o_configurator_t *_configurator, h2o_configurator_context_t *ctx, yoml_t *node)
 {
-    struct listener_configurator_t *configurator = (void *)_configurator;
-
-    /* bail-out unless at host-level */
-    if (ctx->hostconf == NULL || ctx->pathconf != NULL)
-        return 0;
-
-    if (configurator->num_host_listeners == 0 && configurator->num_global_listeners == 0) {
-        h2o_configurator_errprintf(NULL, node, "mandatory configuration directive `listen` is missing");
-        return -1;
+    if (ctx->hostconf == NULL) {
+        /* at global level: bind all hostconfs to the global-level listeners */
+        size_t i;
+        for (i = 0; i != conf.num_listeners; ++i) {
+            struct listener_config_t *listener = conf.listeners[i];
+            if (listener->hosts == NULL)
+                listener->hosts = conf.globalconf.hosts;
+        }
+    } else if (ctx->pathconf == NULL) {
+        /* at host-level */
+        if (conf.num_listeners == 0) {
+            h2o_configurator_errprintf(
+                NULL, node,
+                "mandatory configuration directive `listen` does not exist, neither at global level or at this host level");
+            return -1;
+        }
     }
+
     return 0;
 }
 
 static int setup_running_user(const char *login)
 {
-    static struct passwd passwdbuf;
-    static h2o_iovec_t buf;
+    struct passwd *passwdbuf = h2o_mem_alloc(sizeof(*passwdbuf));
+    char *buf;
+    size_t bufsz = 4096;
 
-    if (buf.base == NULL) {
-        long l = sysconf(_SC_GETPW_R_SIZE_MAX);
-        if (l == -1) {
-            perror("failed to obtain sysconf(_SC_GETPW_R_SIZE_MAX)");
-            return -1;
+Redo:
+    buf = h2o_mem_alloc(bufsz);
+    if (getpwnam_r(login, passwdbuf, buf, bufsz, &conf.running_user) != 0) {
+        if (errno == ERANGE
+#ifdef __APPLE__
+            || errno == EINVAL /* OS X 10.9.5 returns EINVAL if bufsz == 16 */
+#endif
+            ) {
+            free(buf);
+            bufsz *= 2;
+            goto Redo;
         }
-        buf.len = (size_t)l;
-        buf.base = h2o_mem_alloc(buf.len);
-    }
-
-    if (getpwnam_r(login, &passwdbuf, buf.base, buf.len, &conf.running_user) != 0) {
         perror("getpwnam_r");
-        return -1;
     }
     if (conf.running_user == NULL)
         return -1;
@@ -869,6 +885,12 @@ static int on_config_user(h2o_configurator_command_t *cmd, h2o_configurator_cont
         return -1;
     }
 
+    return 0;
+}
+
+static int on_config_pid_file(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
+{
+    conf.pid_file = h2o_strdup(NULL, node->data.scalar, SIZE_MAX).base;
     return 0;
 }
 
@@ -943,20 +965,23 @@ yoml_t *load_config(const char *fn)
 static void notify_all_threads(void)
 {
     unsigned i;
-    for (i = 0; i != conf.num_threads; ++i)
-        h2o_thread_notify(conf.thread_ids[i]);
+    for (i = 0; i != conf.num_threads; ++i) {
+        h2o_multithread_message_t *message = h2o_mem_alloc(sizeof(*message));
+        *message = (h2o_multithread_message_t){};
+        h2o_multithread_send_message(&conf.threads[i].server_notifications, message);
+    }
+}
+
+static void on_sigterm(int signo)
+{
+    conf.shutdown_requested = 1;
+    notify_all_threads();
 }
 
 static void setup_signal_handlers(void)
 {
-    /* block sigs to be caught by the main thread */
-    sigemptyset(&sigs_blocked);
-    sigaddset(&sigs_blocked, SIGTERM);
-    pthread_sigmask(SIG_BLOCK, &sigs_blocked, NULL);
-    /* ignore SIGPIPE */
+    h2o_set_signal_handler(SIGTERM, on_sigterm);
     h2o_set_signal_handler(SIGPIPE, SIG_IGN);
-    /* use SIGCONT for notifying the worker threads */
-    h2o_thread_initialize_signal_for_notification(SIGCONT);
 }
 
 static int num_connections(int delta)
@@ -988,8 +1013,7 @@ static void on_accept(h2o_socket_t *listener, int status)
     do {
         h2o_socket_t *sock;
         if (num_connections(0) >= conf.max_connections) {
-            /* active threads notifies only itself so that it could update the state at the beginning of next loop */
-            h2o_thread_notify(pthread_self());
+            /* the accepting socket is disactivated before entering the next in `run_loop` */
             break;
         }
         if ((sock = h2o_evloop_socket_accept(listener)) == NULL) {
@@ -1001,9 +1025,9 @@ static void on_accept(h2o_socket_t *listener, int status)
         sock->on_close.data = ctx->ctx;
 
         if (ctx->ssl_ctx != NULL)
-            h2o_accept_ssl(ctx->ctx, sock, ctx->ssl_ctx);
+            h2o_accept_ssl(ctx->ctx, ctx->hosts, sock, ctx->ssl_ctx);
         else
-            h2o_http1_accept(ctx->ctx, sock);
+            h2o_http1_accept(ctx->ctx, ctx->hosts, sock);
 
     } while (--num_accepts != 0);
 }
@@ -1025,29 +1049,49 @@ static void update_listener_state(struct listener_ctx_t *listeners)
     }
 }
 
-static void *run_loop(void *_unused)
+static void on_server_notification(h2o_multithread_receiver_t *receiver, h2o_linklist_t *messages)
 {
-    h2o_evloop_t *loop;
-    h2o_context_t ctx;
+    /* the notification is used only for exitting h2o_evloop_run; actual changes are done in the main loop of run_loop */
+
+    while (!h2o_linklist_is_empty(messages)) {
+        h2o_multithread_message_t *message = H2O_STRUCT_FROM_MEMBER(h2o_multithread_message_t, link, messages->next);
+        h2o_linklist_unlink(&message->link);
+        free(message);
+    }
+}
+
+H2O_NORETURN static void *run_loop(void *_thread_index)
+{
+    size_t thread_index = (size_t)_thread_index;
     struct listener_ctx_t *listeners = alloca(sizeof(*listeners) * conf.num_listeners);
     size_t i;
 
-    /* setup loop and context */
-    loop = h2o_evloop_create();
-    h2o_context_init(&ctx, loop, &conf.globalconf);
+    h2o_context_init(&conf.threads[thread_index].ctx, h2o_evloop_create(), &conf.globalconf);
+    h2o_multithread_register_receiver(conf.threads[thread_index].ctx.queue, &conf.threads[thread_index].server_notifications,
+                                      on_server_notification);
+    conf.threads[thread_index].tid = pthread_self();
 
     /* setup listeners */
     for (i = 0; i != conf.num_listeners; ++i) {
         struct listener_config_t *listener_config = conf.listeners[i];
-        int fd = dup(listener_config->fd);
-        if (fd == -1) {
-            perror("failed to dup listening socket");
-            return NULL;
+        int fd;
+        /* dup the listener fd for other threads than the main thread */
+        if (thread_index == 0) {
+            fd = listener_config->fd;
+        } else {
+            if ((fd = dup(listener_config->fd)) == -1) {
+                perror("failed to dup listening socket");
+                abort();
+            }
+            set_cloexec(fd);
         }
-        listeners[i].ctx = &ctx;
-        listeners[i].ssl_ctx = listener_config->ssl.size != 0 ? listener_config->ssl.entries[0].ctx : NULL;
-        listeners[i].sock = h2o_evloop_socket_create(ctx.loop, fd, (struct sockaddr *)&listener_config->addr,
-                                                     listener_config->addrlen, H2O_SOCKET_FLAG_IS_ACCEPT);
+        listeners[i] = (struct listener_ctx_t){
+            &conf.threads[thread_index].ctx,                                             /* ctx */
+            listener_config->hosts,                                                      /* hosts */
+            listener_config->ssl.size != 0 ? listener_config->ssl.entries[0].ctx : NULL, /* ssl_ctx */
+            h2o_evloop_socket_create(conf.threads[thread_index].ctx.loop, fd, (struct sockaddr *)&listener_config->addr,
+                                     listener_config->addrlen, H2O_SOCKET_FLAG_IS_ACCEPT) /* sock */
+        };
         listeners[i].sock->data = listeners + i;
     }
     /* and start listening */
@@ -1055,27 +1099,31 @@ static void *run_loop(void *_unused)
 
     /* the main loop */
     while (1) {
-        if (h2o_thread_is_notified()) {
-            if (conf.shutdown_requested)
-                break;
-            update_listener_state(listeners);
-        }
+        if (conf.shutdown_requested)
+            break;
+        update_listener_state(listeners);
         /* run the loop once */
-        h2o_evloop_run(loop);
+        h2o_evloop_run(conf.threads[thread_index].ctx.loop);
     }
+
+    if (thread_index == 0)
+        fprintf(stderr, "received SIGTERM, gracefully shutting down\n");
 
     /* shutdown requested, close the listeners, notify the protocol handlers, and continue running the loop */
     for (i = 0; i != conf.num_listeners; ++i) {
         h2o_socket_close(listeners[i].sock);
         listeners[i].sock = NULL;
     }
-    h2o_context_request_shutdown(&ctx);
-    while (1)
-        h2o_evloop_run(loop);
-
-    /* the process gets killed as num_connections become zero */
-
-    return NULL;
+    h2o_context_request_shutdown(&conf.threads[thread_index].ctx);
+    while (1) {
+        if (num_connections(0) == 0) {
+            /* terminate the process once the number of connections becomes zero */
+            if (conf.pid_file != NULL)
+                unlink(conf.pid_file);
+            _exit(0);
+        }
+        h2o_evloop_run(conf.threads[thread_index].ctx.loop);
+    }
 }
 
 static void setup_configurators(void)
@@ -1083,11 +1131,10 @@ static void setup_configurators(void)
     h2o_config_init(&conf.globalconf);
 
     {
-        struct listener_configurator_t *c = (void *)h2o_configurator_create(&conf.globalconf, sizeof(*c));
-        c->super.enter = on_config_listen_enter;
-        c->super.exit = on_config_listen_exit;
-        h2o_configurator_define_command(&c->super, "listen", H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_HOST,
-                                        on_config_listen,
+        h2o_configurator_t *c = h2o_configurator_create(&conf.globalconf, sizeof(*c));
+        c->enter = on_config_listen_enter;
+        c->exit = on_config_listen_exit;
+        h2o_configurator_define_command(c, "listen", H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_HOST, on_config_listen,
                                         "port at which the server should listen for incoming requests (mandatory)\n"
                                         " - if the value is a scalar, it is treated as the port number (or as the\n"
                                         "   service name)\n"
@@ -1119,6 +1166,8 @@ static void setup_configurators(void)
         h2o_configurator_define_command(c, "user", H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR,
                                         on_config_user,
                                         "user under with the server should handle incoming requests (default: none)");
+        h2o_configurator_define_command(c, "pid-file", H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR,
+                                        on_config_pid_file, "name of the pid file (default: none)");
         h2o_configurator_define_command(c, "max-connections", H2O_CONFIGURATOR_FLAG_GLOBAL, on_config_max_connections,
                                         "max connections (default: 1024)");
         h2o_configurator_define_command(c, "num-threads", H2O_CONFIGURATOR_FLAG_GLOBAL, on_config_num_threads,
@@ -1238,6 +1287,9 @@ int main(int argc, char **argv)
         }
     }
 
+    setup_signal_handlers();
+
+    /* setuid */
     if (conf.running_user != NULL) {
         if (h2o_setuidgid(conf.running_user) != 0) {
             fprintf(stderr, "failed to change the running user (are you sure you are running as root?)\n");
@@ -1255,47 +1307,32 @@ int main(int argc, char **argv)
         }
     }
 
-    setup_signal_handlers();
+    /* pid file must be written after setuid, since we need to remove it  */
+    if (conf.pid_file != NULL) {
+        FILE *fp = fopen(conf.pid_file, "wt");
+        if (fp == NULL) {
+            fprintf(stderr, "failed to open pid file:%s:%s\n", conf.pid_file, strerror(errno));
+            return EX_OSERR;
+        }
+        fprintf(fp, "%d\n", (int)getpid());
+        fclose(fp);
+    }
 
     fprintf(stderr, "h2o server (pid:%d) is ready to serve requests\n", (int)getpid());
 
     assert(conf.num_threads != 0);
 
-    { /* the main loop */
-        unsigned int i;
-        /* start the threads */
-        conf.thread_ids = alloca(sizeof(pthread_t) * conf.num_threads);
-        for (i = 0; i != conf.num_threads; ++i) {
-            pthread_create(conf.thread_ids + i, NULL, run_loop, NULL);
-        }
-        /* wait until shutdown is requested */
-        while (!conf.shutdown_requested) {
-            int signo, err = sigwait(&sigs_blocked, &signo);
-            if (err != 0) {
-                if (err == EINTR)
-                    continue;
-                perror("sigwait failed");
-                abort();
-            }
-            switch (signo) {
-            case SIGTERM:
-                conf.shutdown_requested = 1;
-                break;
-            default:
-                fprintf(stderr, "sigwait returned unexpected signal:%d\n", signo);
-                break;
-            }
-        }
-        fprintf(stderr, "received SIGTERM, gracefully shutting down\n");
-        /* close all the listeners */
-        for (i = 0; i != conf.num_listeners; ++i) {
-            close(conf.listeners[i]->fd);
-            conf.listeners[i]->fd = -1;
-        }
-        /* wait until the number of connections becomes zero, and exit */
-        while (num_connections(0) != 0)
-            usleep(100 * 1000);
-
-        _exit(0);
+    /* start the threads */
+    conf.threads = alloca(sizeof(conf.threads[0]) * conf.num_threads);
+    size_t i;
+    for (i = 1; i != conf.num_threads; ++i) {
+        pthread_t tid;
+        pthread_create(&tid, NULL, run_loop, (void *)i);
     }
+
+    /* this thread becomes the first thread */
+    run_loop((void *)0);
+
+    /* notreached */
+    return 0;
 }

@@ -28,12 +28,13 @@
 
 static const h2o_iovec_t CONNECTION_PREFACE = {H2O_STRLIT("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")};
 
-static const h2o_iovec_t alpn_protocols[] = {{H2O_STRLIT("h2-16")}, /* the lastest draft */
-                                             {H2O_STRLIT("h2-14")}, /* keep draft-14 for compatibility */
-                                             {NULL, 0}};
+/* h2-14 and h2-16 are kept for backwards compatibility, as they are often used */
+static const h2o_iovec_t alpn_protocols[] = {{H2O_STRLIT("h2")}, {H2O_STRLIT("h2-16")}, {H2O_STRLIT("h2-14")}, {NULL, 0}};
 const h2o_iovec_t *h2o_http2_alpn_protocols = alpn_protocols;
 /* npn defs should match the definition of alpn_protocols */
-const char *h2o_http2_npn_protocols = "\x05"
+const char *h2o_http2_npn_protocols = "\x02"
+                                      "h2"
+                                      "\x05"
                                       "h2-16"
                                       "\x05"
                                       "h2-14";
@@ -294,14 +295,16 @@ static void request_gathered_write(h2o_http2_conn_t *conn)
     }
 }
 
-static void update_stream_output_window(h2o_http2_stream_t *stream, ssize_t delta)
+static int update_stream_output_window(h2o_http2_stream_t *stream, ssize_t delta)
 {
     ssize_t cur = h2o_http2_window_get_window(&stream->output_window);
-    h2o_http2_window_update(&stream->output_window, delta);
+    if (h2o_http2_window_update(&stream->output_window, delta) != 0)
+        return -1;
     if (cur <= 0 && h2o_http2_window_get_window(&stream->output_window) > 0 && h2o_http2_stream_has_pending_data(stream)) {
         assert(!h2o_linklist_is_linked(&stream->_refs.link));
         h2o_http2_scheduler_activate(&stream->_refs.scheduler);
     }
+    return 0;
 }
 
 static int handle_incoming_request(h2o_http2_conn_t *conn, h2o_http2_stream_t *stream, const uint8_t *src, size_t len,
@@ -638,11 +641,18 @@ static int handle_window_update_frame(h2o_http2_conn_t *conn, h2o_http2_frame_t 
     }
 
     if (frame->stream_id == 0) {
-        h2o_http2_window_update(&conn->_write.window, payload.window_size_increment);
+        if (h2o_http2_window_update(&conn->_write.window, payload.window_size_increment) != 0) {
+            *err_desc = "flow control window overflow";
+            return H2O_HTTP2_ERROR_FLOW_CONTROL;
+        }
     } else if (!is_idle_stream_id(conn, frame->stream_id)) {
         h2o_http2_stream_t *stream = h2o_http2_conn_get_stream(conn, frame->stream_id);
         if (stream != NULL) {
-            update_stream_output_window(stream, payload.window_size_increment);
+            if (update_stream_output_window(stream, payload.window_size_increment) != 0) {
+                h2o_http2_stream_reset(conn, stream);
+                send_stream_error(conn, frame->stream_id, H2O_HTTP2_ERROR_FLOW_CONTROL);
+                return 0;
+            }
         }
     } else {
         *err_desc = "invaild stream id in WINDOW_UPDATE frame";
@@ -969,13 +979,15 @@ static void emit_writereq(h2o_timeout_entry_t *entry)
     do_emit_writereq(conn);
 }
 
-static h2o_http2_conn_t *create_conn(h2o_context_t *ctx, h2o_socket_t *sock, struct sockaddr *addr, socklen_t addrlen)
+static h2o_http2_conn_t *create_conn(h2o_context_t *ctx, h2o_hostconf_t **hosts, h2o_socket_t *sock, struct sockaddr *addr,
+                                     socklen_t addrlen)
 {
     h2o_http2_conn_t *conn = h2o_mem_alloc(sizeof(*conn));
 
     /* init the connection */
     memset(conn, 0, sizeof(*conn));
     conn->super.ctx = ctx;
+    conn->super.hosts = hosts;
     conn->super.peername.addr = addr;
     conn->super.peername.len = addrlen;
     conn->sock = sock;
@@ -1058,9 +1070,9 @@ int h2o_http2_conn_send_push_promise(h2o_http2_conn_t *conn, h2o_http2_stream_t 
     return 0;
 }
 
-void h2o_http2_accept(h2o_context_t *ctx, h2o_socket_t *sock)
+void h2o_http2_accept(h2o_context_t *ctx, h2o_hostconf_t **hosts, h2o_socket_t *sock)
 {
-    h2o_http2_conn_t *conn = create_conn(ctx, sock, (void *)&sock->peername.addr, sock->peername.len);
+    h2o_http2_conn_t *conn = create_conn(ctx, hosts, sock, (void *)&sock->peername.addr, sock->peername.len);
     sock->data = conn;
     h2o_socket_read_start(conn->sock, on_read);
     update_idle_timeout(conn);
@@ -1070,7 +1082,8 @@ void h2o_http2_accept(h2o_context_t *ctx, h2o_socket_t *sock)
 
 int h2o_http2_handle_upgrade(h2o_req_t *req)
 {
-    h2o_http2_conn_t *http2conn = create_conn(req->conn->ctx, NULL, req->conn->peername.addr, req->conn->peername.len);
+    h2o_http2_conn_t *http2conn =
+        create_conn(req->conn->ctx, req->conn->hosts, NULL, req->conn->peername.addr, req->conn->peername.len);
     h2o_http1_conn_t *req_conn = (h2o_http1_conn_t *)req->conn;
     h2o_http2_stream_t *stream;
     ssize_t connection_index, settings_index;

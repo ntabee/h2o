@@ -27,6 +27,7 @@ extern "C" {
 #endif
 
 #include <assert.h>
+#include <stdint.h>
 #include "khash.h"
 #include "./http2/scheduler.h"
 
@@ -284,7 +285,7 @@ void h2o_http2_conn_unregister_stream(h2o_http2_conn_t *conn, h2o_http2_stream_t
 static h2o_http2_stream_t *h2o_http2_conn_get_stream(h2o_http2_conn_t *conn, uint32_t stream_id);
 void h2o_http2_conn_push_path(h2o_http2_conn_t *conn, h2o_iovec_t path, h2o_http2_stream_t *src_stream);
 int h2o_http2_conn_send_push_promise(h2o_http2_conn_t *conn, h2o_http2_stream_t *stream);
-void h2o_http2_accept(h2o_context_t *ctx, h2o_socket_t *sock);
+void h2o_http2_accept(h2o_context_t *ctx, h2o_hostconf_t **hosts, h2o_socket_t *sock);
 int h2o_http2_handle_upgrade(h2o_req_t *req);
 void h2o_http2_conn_request_write(h2o_http2_conn_t *conn);
 void h2o_http2_conn_register_for_proceed_callback(h2o_http2_conn_t *conn, h2o_http2_stream_t *stream);
@@ -304,7 +305,7 @@ void h2o_http2_stream_proceed(h2o_http2_conn_t *conn, h2o_http2_stream_t *stream
 
 /* misc */
 static void h2o_http2_window_init(h2o_http2_window_t *window, const h2o_http2_settings_t *peer_settings);
-static void h2o_http2_window_update(h2o_http2_window_t *window, ssize_t delta);
+static int h2o_http2_window_update(h2o_http2_window_t *window, ssize_t delta);
 static ssize_t h2o_http2_window_get_window(h2o_http2_window_t *window);
 static void h2o_http2_window_consume_window(h2o_http2_window_t *window, size_t bytes);
 
@@ -414,9 +415,13 @@ inline void h2o_http2_window_init(h2o_http2_window_t *window, const h2o_http2_se
     window->_avail = peer_settings->initial_window_size;
 }
 
-inline void h2o_http2_window_update(h2o_http2_window_t *window, ssize_t delta)
+inline int h2o_http2_window_update(h2o_http2_window_t *window, ssize_t delta)
 {
-    window->_avail += delta;
+    size_t v = window->_avail + delta;
+    if (v > INT32_MAX)
+        return -1;
+    window->_avail = v;
+    return 0;
 }
 
 inline ssize_t h2o_http2_window_get_window(h2o_http2_window_t *window)
