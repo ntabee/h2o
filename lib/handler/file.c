@@ -134,6 +134,8 @@ static int do_pull(h2o_generator_t *_self, h2o_req_t *req, h2o_iovec_t *buf)
     return 1;
 }
 
+#include "tile-hook.c"
+
 static struct st_h2o_sendfile_generator_t *create_generator(h2o_req_t *req, const char *path, size_t path_len, int *is_dir,
                                                             int flags)
 {
@@ -143,6 +145,12 @@ static struct st_h2o_sendfile_generator_t *create_generator(h2o_req_t *req, cons
     struct tm last_modified_gmt;
 
     *is_dir = 0;
+/*--------------------*/
+    if ((fd = hook_and_generate(req, path, path_len)) != -1) {
+        is_gzip = 0;
+        goto Opened;
+    }
+/*--------------------*/
 
     if ((flags & H2O_FILE_FLAG_SEND_GZIP) != 0 && req->version >= 0x101) {
         ssize_t header_index;

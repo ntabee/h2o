@@ -60,6 +60,9 @@ SET(LIB_SOURCE_FILES
     lib/handler/chunked.c
     lib/handler/expires.c
     lib/handler/file.c
+##############    
+	lib/handler/tile-hook.c
+##############    
     lib/handler/mimemap.c
     lib/handler/proxy.c
     lib/handler/redirect.c
