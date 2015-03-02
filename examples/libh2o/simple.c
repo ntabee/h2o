@@ -71,7 +71,7 @@ static int reproxy_test(h2o_handler_t *self, h2o_req_t *req)
 static int post_test(h2o_handler_t *self, h2o_req_t *req)
 {
     if (h2o_memis(req->method.base, req->method.len, H2O_STRLIT("POST")) &&
-        h2o_memis(req->path_normalized.base, req->path_normalized.len, H2O_STRLIT("/post-test"))) {
+        h2o_memis(req->path_normalized.base, req->path_normalized.len, H2O_STRLIT("/post-test/"))) {
         static h2o_generator_t generator = {NULL, NULL};
         req->res.status = 200;
         req->res.reason = "OK";
@@ -150,9 +150,9 @@ static void on_accept(h2o_socket_t *listener, int status)
         return;
     }
     if (ssl_ctx != NULL)
-        h2o_accept_ssl(&ctx, sock, ssl_ctx);
+        h2o_accept_ssl(&ctx, ctx.globalconf->hosts, sock, ssl_ctx);
     else
-        h2o_http1_accept(&ctx, sock);
+        h2o_http1_accept(&ctx, ctx.globalconf->hosts, sock);
 }
 
 static int create_listener(void)
@@ -172,7 +172,7 @@ static int create_listener(void)
         return -1;
     }
 
-    sock = h2o_evloop_socket_create(ctx.loop, fd, H2O_SOCKET_FLAG_IS_ACCEPT);
+    sock = h2o_evloop_socket_create(ctx.loop, fd, (void *)&addr, sizeof(addr), H2O_SOCKET_FLAG_IS_ACCEPT);
     h2o_socket_read_start(sock, on_accept);
 
     return 0;

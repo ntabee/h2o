@@ -24,7 +24,7 @@
 #include "h2o.h"
 #include "h2o/http1.h"
 #include "h2o/http2.h"
-#include "internal.h"
+#include "h2o/http2_internal.h"
 
 static const h2o_iovec_t CONNECTION_PREFACE = {H2O_STRLIT("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")};
 
@@ -1026,10 +1026,11 @@ void h2o_http2_conn_push_path(h2o_http2_conn_t *conn, h2o_iovec_t path, h2o_http
     h2o_http2_stream_prepare_for_request(conn, stream);
 
     /* setup request */
-    stream->req.method = (h2o_iovec_t){H2O_STRLIT("GET")};
-    stream->req.scheme = src_stream->req.scheme;
-    stream->req.authority = h2o_strdup(&stream->req.pool, src_stream->req.authority.base, src_stream->req.authority.len);
-    stream->req.path = h2o_strdup(&stream->req.pool, path.base, path.len);
+    stream->req.input.method = (h2o_iovec_t){H2O_STRLIT("GET")};
+    stream->req.input.scheme = src_stream->req.input.scheme;
+    stream->req.input.authority =
+        h2o_strdup(&stream->req.pool, src_stream->req.input.authority.base, src_stream->req.input.authority.len);
+    stream->req.input.path = h2o_strdup(&stream->req.pool, path.base, path.len);
     stream->req.version = 0x200;
 
     { /* copy headers that may affect the response (of a cacheable response) */
@@ -1084,7 +1085,6 @@ int h2o_http2_handle_upgrade(h2o_req_t *req)
 {
     h2o_http2_conn_t *http2conn =
         create_conn(req->conn->ctx, req->conn->hosts, NULL, req->conn->peername.addr, req->conn->peername.len);
-    h2o_http1_conn_t *req_conn = (h2o_http1_conn_t *)req->conn;
     h2o_http2_stream_t *stream;
     ssize_t connection_index, settings_index;
     h2o_iovec_t settings_decoded;
@@ -1122,7 +1122,7 @@ int h2o_http2_handle_upgrade(h2o_req_t *req)
     req->res.status = 101;
     req->res.reason = "Switching Protocols";
     h2o_add_header(&req->pool, &req->res.headers, H2O_TOKEN_UPGRADE, H2O_STRLIT("h2c"));
-    h2o_http1_upgrade(req_conn, (h2o_iovec_t *)&SETTINGS_HOST_BIN, 1, on_upgrade_complete, http2conn);
+    h2o_http1_upgrade(req, (h2o_iovec_t *)&SETTINGS_HOST_BIN, 1, on_upgrade_complete, http2conn);
 
     return 0;
 Error:

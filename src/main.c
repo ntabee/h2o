@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -53,7 +54,7 @@
 #include "h2o/serverutil.h"
 
 /* simply use a large value, and let the kernel clip it to the internal max */
-#define H2O_SOMAXCONN (65536)
+#define H2O_SOMAXCONN (65535)
 
 struct listener_ssl_config_t {
     H2O_VECTOR(h2o_iovec_t) hostnames;
@@ -1177,7 +1178,9 @@ static void setup_configurators(void)
     h2o_access_log_register_configurator(&conf.globalconf);
     h2o_expires_register_configurator(&conf.globalconf);
     h2o_file_register_configurator(&conf.globalconf);
+    h2o_headers_register_configurator(&conf.globalconf);
     h2o_proxy_register_configurator(&conf.globalconf);
+    h2o_reproxy_register_configurator(&conf.globalconf);
     h2o_redirect_register_configurator(&conf.globalconf);
 }
 
