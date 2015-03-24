@@ -144,8 +144,8 @@ static int on_config_exit(h2o_configurator_t *_self, h2o_configurator_context_t 
         h2o_headers_register(ctx->pathconf, self->cmds->entries);
     } else {
         free(self->cmds->entries);
-        memset(self->cmds, 0, sizeof(*self->cmds));
     }
+    memset(self->cmds, 0, sizeof(*self->cmds));
 
     --self->cmds;
     return 0;
@@ -163,9 +163,10 @@ void h2o_headers_register_configurator(h2o_globalconf_t *conf)
                                     cb, desc)
     DEFINE_CMD("header.add", on_config_header_add, "adds a new header line to the response headers");
     DEFINE_CMD("header.append", on_config_header_append,
-               "adds a new header line, or appends the value to the existing header with the same name (separated by `,`)");
-    DEFINE_CMD("header.merge", on_config_header_merge,
-               "adds a new header line, or merges the value to the existing header of comma-separated values");
+               "adds a new header line, or appends the value to the existing header with\n"
+               "the same name (separated by `,`)");
+    DEFINE_CMD("header.merge", on_config_header_merge, "adds a new header line, or merges the value to the existing header of\n"
+                                                       "comma-separated values");
     DEFINE_CMD("header.set", on_config_header_set, "sets a header line, removing headers with the same name (if exist)");
     DEFINE_CMD("header.setifempty", on_config_header_setifempty,
                "sets a header line, only when a header with the same name does not exist");

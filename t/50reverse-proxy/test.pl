@@ -20,19 +20,19 @@ my $huge_file_size = 50 * 1024 * 1024; # should be larger than the mmap_backend 
 my $huge_file = create_data_file($huge_file_size);
 my $huge_file_md5 = md5_file($huge_file);
 
-for my $i (0..7) {
-    my $h2o_keepalive = $i & 1 ? 1 : 0;
-    my $starlet_keepalive = $i & 2 ? 1 : 0;
-    my $starlet_force_chunked = $i & 4 ? 1 : 0;
-    my $upstream_port = empty_port();
+$0 =~ /-([0-9]+)\.t$/
+    or die "failed to determine mode from \$0";
+my $mode = $1;
 
-    subtest "e2e (h2o:$h2o_keepalive, starlet: $starlet_keepalive, starlet-chunked: $starlet_force_chunked)" => sub {
-        ok ! check_port($upstream_port), "upstream should be down now";
+my $h2o_keepalive = $mode & 1 ? 1 : 0;
+my $starlet_keepalive = $mode & 2 ? 1 : 0;
+my $starlet_force_chunked = $mode & 4 ? 1 : 0;
+my $upstream_port = empty_port();
 
-        local $ENV{FORCE_CHUNKED} = $starlet_force_chunked;
-        my $guard = spawn_upstream($upstream_port, $starlet_keepalive ? +("--max-keepalive-reqs=100") : ());
+local $ENV{FORCE_CHUNKED} = $starlet_force_chunked;
+my $guard = spawn_upstream($upstream_port, $starlet_keepalive ? +("--max-keepalive-reqs=100") : ());
 
-        run_tests_with_conf($upstream_port, << "EOT");
+run_tests_with_conf($upstream_port, << "EOT");
 hosts:
   default:
     paths:
@@ -43,9 +43,6 @@ hosts:
 @{[ $h2o_keepalive ? "" : "        proxy.timeout.keepalive: 0" ]}
 reproxy: ON
 EOT
-    };
-    ok ! check_port($upstream_port), "upstream should be down now";
-}
 
 sub spawn_upstream {
     my ($port, @extra) = @_;
@@ -119,8 +116,9 @@ sub run_tests_with_conf {
                 is md5_hex($content), $files{"index.txt"}->{md5}, "reproxy & internal redirect to file (md5)";
                 $content = `curl --silent --dump-header /dev/stderr --insecure "$proto://127.0.0.1:$port/?resp:status=200&resp:x-reproxy-url=http://127.0.0.1:$upstream_port/?resp:status=302%26resp:location=https://127.0.0.1:$upstream_port/index.txt" 2>&1 > /dev/null`;
                 like $content, qr{^HTTP/1\.1 502 }m, "cannot handle internal redirect via location: to https";
-                $content = `curl --silent --dump-header /dev/stderr --insecure "$proto://127.0.0.1:$port/?resp:status=200&resp:x-reproxy-url=http://default/files" 2>&1 > /dev/null`;
-                unlike $content, qr{^HTTP/1\.1 3}m, "once delegated, redirects of the file handler should be handled internally";
+                $content = `curl --silent --insecure "$proto://127.0.0.1:$port/?resp:status=200&resp:x-reproxy-url=http://default/files"`;
+                is length($content), $files{"index.txt"}->{size}, "redirect handled internally after delegation (size)";
+                is md5_hex($content), $files{"index.txt"}->{md5}, "redirect handled internally after delegation (md5)";
             };
             subtest "x-forwarded ($proto)" => sub {
                 my $resp = `curl --silent --insecure $proto://127.0.0.1:$port/echo-headers`;
@@ -146,11 +144,11 @@ sub run_tests_with_conf {
                 is length($content), $files{$file}->{size}, "$proto://127.0.0.1/$file (size)";
                 is md5_hex($content), $files{$file}->{md5}, "$proto://127.0.0.1/$file (md5)";
             }
-            my $out = `nghttp $opt -H':method: POST' -d t/50reverse-proxy/hello.txt $proto://127.0.0.1:$port/echo`;
+            my $out = `nghttp $opt -d t/50reverse-proxy/hello.txt $proto://127.0.0.1:$port/echo`;
             is $out, "hello\n", "$proto://127.0.0.1/echo (POST)";
             $out = `nghttp $opt -m 10 $proto://127.0.0.1:$port/index.txt`;
             is $out, "hello\n" x 10, "$proto://127.0.0.1/index.txt x 10 times";
-            $out = `nghttp $opt -H':method: POST' -d $huge_file $proto://127.0.0.1:$port/echo`;
+            $out = `nghttp $opt -d $huge_file $proto://127.0.0.1:$port/echo`;
             is length($out), $huge_file_size, "$proto://127.0.0.1/echo (mmap-backed, size)";
             is md5_hex($out), $huge_file_md5, "$proto://127.0.0.1/echo (mmap-backed, md5)";
             subtest 'cookies' => sub {

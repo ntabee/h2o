@@ -29,7 +29,7 @@
 #define H2O_SOCKET_FLAG_IS_WRITE_ERROR 0x4
 #define H2O_SOCKET_FLAG_IS_POLLED_FOR_READ 0x8
 #define H2O_SOCKET_FLAG_IS_POLLED_FOR_WRITE 0x10
-#define H2O_SOCKET_FLAG_IS_ACCEPT 0x20
+#define H2O_SOCKET_FLAG_DONT_READ 0x20
 #define H2O_SOCKET_FLAG_IS_CONNECTING 0x40
 #define H2O_SOCKET_FLAG__EPOLL_IS_REGISTERED 0x1000
 
@@ -46,6 +46,7 @@ typedef struct st_h2o_evloop_t {
 typedef h2o_evloop_t h2o_loop_t;
 
 struct st_h2o_timeout_backend_properties_t {
+    char _dummy; /* sizeof(empty_struct) differs bet. C (GCC extension) and C++ */
 };
 
 h2o_socket_t *h2o_evloop_socket_create(h2o_evloop_t *loop, int fd, struct sockaddr *addr, socklen_t addrlen, int flags);

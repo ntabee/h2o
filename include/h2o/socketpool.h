@@ -26,18 +26,26 @@
 extern "C" {
 #endif
 
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <pthread.h>
 #include "h2o/linklist.h"
+#include "h2o/multithread.h"
 #include "h2o/socket.h"
 #include "h2o/timeout.h"
 
 typedef struct st_h2o_socketpool_t {
     /* read-only vars */
-    h2o_iovec_t host;
     struct {
-        uint16_t n;
-        char s[sizeof("65535")];
-    } port;
+        union {
+            struct {
+                h2o_iovec_t host;
+                char port[sizeof("65535")];
+            } named;
+            struct sockaddr_in sin;
+        };
+        int is_named;
+    } peer;
     size_t capacity;
     uint64_t timeout; /* in milliseconds (UINT64_MAX if not set) */
     struct {
@@ -71,8 +79,8 @@ void h2o_socketpool_set_timeout(h2o_socketpool_t *pool, h2o_loop_t *loop, uint64
 /**
  * connects to the peer (or returns a pooled connection)
  */
-h2o_socketpool_connect_request_t *h2o_socketpool_connect(h2o_socketpool_t *pool, h2o_loop_t *loop, h2o_timeout_t *zero_timeout,
-                                                         h2o_socketpool_connect_cb cb, void *data);
+void h2o_socketpool_connect(h2o_socketpool_connect_request_t **req, h2o_socketpool_t *pool, h2o_loop_t *loop,
+                            h2o_multithread_receiver_t *getaddr_receiver, h2o_socketpool_connect_cb cb, void *data);
 /**
  * cancels a connect request
  */

@@ -56,10 +56,13 @@
 /* simply use a large value, and let the kernel clip it to the internal max */
 #define H2O_SOMAXCONN (65535)
 
+#define H2O_DEFAULT_NUM_NAME_RESOLUTION_THREADS 32
+
 struct listener_ssl_config_t {
     H2O_VECTOR(h2o_iovec_t) hostnames;
     char *certificate_file;
     SSL_CTX *ctx;
+#ifndef OPENSSL_NO_OCSP
     struct {
         uint64_t interval;
         unsigned max_failures;
@@ -70,6 +73,7 @@ struct listener_ssl_config_t {
             h2o_buffer_t *data;
         } response;
     } ocsp_stapling;
+#endif
 };
 
 struct listener_config_t {
@@ -134,6 +138,12 @@ static void set_cloexec(int fd)
         perror("failed to set FD_CLOEXEC");
         abort();
     }
+}
+
+static int on_openssl_print_errors(const char *str, size_t len, void *fp)
+{
+    fwrite(str, 1, len, fp);
+    return (int)len;
 }
 
 static unsigned long openssl_thread_id_callback(void)
@@ -206,6 +216,8 @@ static int on_sni_callback(SSL *ssl, int *ad, void *arg)
 
     return SSL_TLSEXT_ERR_OK;
 }
+
+#ifndef OPENSSL_NO_OCSP
 
 static void update_ocsp_stapling(struct listener_ssl_config_t *ssl_conf, h2o_buffer_t *resp)
 {
@@ -334,6 +346,8 @@ static int on_ocsp_stapling_callback(SSL *ssl, void *_ssl_conf)
     }
 }
 
+#endif
+
 static void listener_setup_ssl_add_host(struct listener_ssl_config_t *ssl_config, h2o_iovec_t host)
 {
     const char *host_end = memchr(host.base, ':', host.len);
@@ -390,7 +404,7 @@ static int listener_setup_ssl(h2o_configurator_command_t *cmd, h2o_configurator_
         }                                                                                                                          \
         p = value;                                                                                                                 \
         continue;                                                                                                                  \
-    } else
+    }
             FETCH_PROPERTY("certificate-file", certificate_file);
             FETCH_PROPERTY("key-file", key_file);
             FETCH_PROPERTY("minimum-version", minimum_version);
@@ -399,6 +413,17 @@ static int listener_setup_ssl(h2o_configurator_command_t *cmd, h2o_configurator_
             FETCH_PROPERTY("ocsp-update-interval", ocsp_update_interval_node);
             FETCH_PROPERTY("ocsp-max-failures", ocsp_max_failures_node);
             FETCH_PROPERTY("dh-file", dh_file);
+            if (strcmp(key->data.scalar, "cipher-preference") == 0) {
+                if (value->type == YOML_TYPE_SCALAR && strcasecmp(value->data.scalar, "client") == 0) {
+                    ssl_options &= ~SSL_OP_CIPHER_SERVER_PREFERENCE;
+                } else if (value->type == YOML_TYPE_SCALAR && strcasecmp(value->data.scalar, "server") == 0) {
+                    ssl_options |= SSL_OP_CIPHER_SERVER_PREFERENCE;
+                } else {
+                    h2o_configurator_errprintf(cmd, value, "property of `cipher-preference` must be either of: `client`, `server`");
+                    return -1;
+                }
+                continue;
+            }
             h2o_configurator_errprintf(cmd, key, "unknown property: %s", key->data.scalar);
             return -1;
 #undef FETCH_PROPERTY
@@ -464,31 +489,31 @@ static int listener_setup_ssl(h2o_configurator_command_t *cmd, h2o_configurator_
     setup_ecc_key(ssl_ctx);
     if (SSL_CTX_use_certificate_chain_file(ssl_ctx, certificate_file->data.scalar) != 1) {
         h2o_configurator_errprintf(cmd, certificate_file, "failed to load certificate file:%s\n", certificate_file->data.scalar);
-        ERR_print_errors_fp(stderr);
+        ERR_print_errors_cb(on_openssl_print_errors, stderr);
         goto Error;
     }
     if (SSL_CTX_use_PrivateKey_file(ssl_ctx, key_file->data.scalar, SSL_FILETYPE_PEM) != 1) {
         h2o_configurator_errprintf(cmd, key_file, "failed to load private key file:%s\n", key_file->data.scalar);
-        ERR_print_errors_fp(stderr);
+        ERR_print_errors_cb(on_openssl_print_errors, stderr);
         goto Error;
     }
     if (cipher_suite != NULL && SSL_CTX_set_cipher_list(ssl_ctx, cipher_suite->data.scalar) != 1) {
         h2o_configurator_errprintf(cmd, cipher_suite, "failed to setup SSL cipher suite\n");
-        ERR_print_errors_fp(stderr);
+        ERR_print_errors_cb(on_openssl_print_errors, stderr);
         goto Error;
     }
     if (dh_file != NULL) {
         BIO *bio = BIO_new_file(dh_file->data.scalar, "r");
         if (bio == NULL) {
             h2o_configurator_errprintf(cmd, dh_file, "failed to load dhparam file:%s\n", dh_file->data.scalar);
-            ERR_print_errors_fp(stderr);
+            ERR_print_errors_cb(on_openssl_print_errors, stderr);
             goto Error;
         }
         DH *dh = PEM_read_bio_DHparams(bio, NULL, NULL, NULL);
         BIO_free(bio);
         if (dh == NULL) {
             h2o_configurator_errprintf(cmd, dh_file, "failed to load dhparam file:%s\n", dh_file->data.scalar);
-            ERR_print_errors_fp(stderr);
+            ERR_print_errors_cb(on_openssl_print_errors, stderr);
             goto Error;
         }
         SSL_CTX_set_tmp_dh(ssl_ctx, dh);
@@ -520,6 +545,10 @@ static int listener_setup_ssl(h2o_configurator_command_t *cmd, h2o_configurator_
         }
         ssl_config->ctx = ssl_ctx;
         ssl_config->certificate_file = h2o_strdup(NULL, certificate_file->data.scalar, SIZE_MAX).base;
+#ifdef OPENSSL_NO_OCSP
+        if (ocsp_update_interval != 0)
+            fprintf(stderr, "[OCSP Stapling] disabled (not support by the SSL library)\n");
+#else
         SSL_CTX_set_tlsext_status_cb(ssl_ctx, on_ocsp_stapling_callback);
         SSL_CTX_set_tlsext_status_arg(ssl_ctx, ssl_config);
         pthread_mutex_init(&ssl_config->ocsp_stapling.response.mutex, NULL);
@@ -551,6 +580,7 @@ static int listener_setup_ssl(h2o_configurator_command_t *cmd, h2o_configurator_
                 pthread_create(&ssl_config->ocsp_stapling.updater_tid, NULL, ocsp_updater_thread, ssl_config);
             }
         }
+#endif
     }
 
     return 0;
@@ -911,6 +941,17 @@ static int on_config_num_threads(h2o_configurator_command_t *cmd, h2o_configurat
     return 0;
 }
 
+static int on_config_num_name_resolution_threads(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
+{
+    if (h2o_configurator_scanf(cmd, node, "%zu", &h2o_hostinfo_max_threads) != 0)
+        return -1;
+    if (h2o_hostinfo_max_threads == 0) {
+        h2o_configurator_errprintf(cmd, node, "num-name-resolution-threads should be >=1");
+        return -1;
+    }
+    return 0;
+}
+
 static void usage_print_directives(h2o_globalconf_t *conf)
 {
     h2o_linklist_t *node;
@@ -1091,7 +1132,7 @@ H2O_NORETURN static void *run_loop(void *_thread_index)
             listener_config->hosts,                                                      /* hosts */
             listener_config->ssl.size != 0 ? listener_config->ssl.entries[0].ctx : NULL, /* ssl_ctx */
             h2o_evloop_socket_create(conf.threads[thread_index].ctx.loop, fd, (struct sockaddr *)&listener_config->addr,
-                                     listener_config->addrlen, H2O_SOCKET_FLAG_IS_ACCEPT) /* sock */
+                                     listener_config->addrlen, H2O_SOCKET_FLAG_DONT_READ) /* sock */
         };
         listeners[i].sock->data = listeners + i;
     }
@@ -1143,21 +1184,24 @@ static void setup_configurators(void)
                                         "     port: incoming port number or service name (mandatory)\n"
                                         "     host: incoming address (default: any address)\n"
                                         "     ssl: mapping of SSL configuration using the keys below (default: none)\n"
-                                        "       certificate-file: path of the SSL certificate file (mandatory)\n"
-                                        "       key-file:         path of the SSL private key file (mandatory)\n"
-                                        "       minimum-version:  minimum protocol version, should be one of: SSLv2,\n"
-                                        "                         SSLv3, TLSv1, TLSv1.1, TLSv1.2 (default: TLSv1)\n"
-                                        "       cipher-suite:     list of cipher suites to be passed to OpenSSL via\n"
-                                        "                         SSL_CTX_set_cipher_list (optional)\n"
-                                        "       dh-file:          PEM file of dhparam to use (optional)\n"
+                                        "       certificate-file:  path of the SSL certificate file (mandatory)\n"
+                                        "       key-file:          path of the SSL private key file (mandatory)\n"
+                                        "       minimum-version:   minimum protocol version, should be one of:\n"
+                                        "                          `SSLv2`, `SSLv3`, `TLSv1`, `TLSv1.1`, `TLSv1.2`\n"
+                                        "                          (default: TLSv1)\n"
+                                        "       cipher-suite:      list of cipher suites to be passed to OpenSSL via\n"
+                                        "                          SSL_CTX_set_cipher_list (optional)\n"
+                                        "       cipher-preference: side of the list that should be used for\n"
+                                        "                          selecting the cipher-suite; should be either of:\n"
+                                        "                          `client`, `server` (default: client)\n"
+                                        "       dh-file:           PEM file of dhparam to use (optional)\n"
                                         "       ocsp-update-interval:\n"
-                                        "                         interval for updating the OCSP stapling data (in\n"
-                                        "                         seconds), or set to zero to disable OCSP stapling\n"
-                                        "                         (default: 14400 = 4 hours)\n"
-                                        "       ocsp-max-failures:\n"
-                                        "                         number of consecutive OCSP queriy failures before\n"
-                                        "                         stopping to send OCSP stapling data to the client\n"
-                                        "                         (default: 3)\n"
+                                        "                          interval for updating the OCSP stapling data (in\n"
+                                        "                          seconds), or set to zero to disable OCSP stapling\n"
+                                        "                          (default: 14400 = 4 hours)\n"
+                                        "       ocsp-max-failures: number of consecutive OCSP queriy failures before\n"
+                                        "                          stopping to send OCSP stapling data to the client\n"
+                                        "                          (default: 3)\n"
                                         " - if the value is a sequence, each element should be either a scalar or a\n"
                                         "   mapping that conform to the requirements above");
     }
@@ -1173,6 +1217,9 @@ static void setup_configurators(void)
                                         "max connections (default: 1024)");
         h2o_configurator_define_command(c, "num-threads", H2O_CONFIGURATOR_FLAG_GLOBAL, on_config_num_threads,
                                         "number of worker threads (default: getconf NPROCESSORS_ONLN)");
+        h2o_configurator_define_command(
+            c, "num-name-resolution-threads", H2O_CONFIGURATOR_FLAG_GLOBAL, on_config_num_name_resolution_threads,
+            "number of threads to run for name resolution (default: " H2O_TO_STR(H2O_DEFAULT_NUM_NAME_RESOLUTION_THREADS) ")");
     }
 
     h2o_access_log_register_configurator(&conf.globalconf);
@@ -1189,6 +1236,7 @@ int main(int argc, char **argv)
     const char *opt_config_file = "h2o.conf";
 
     conf.num_threads = h2o_numproc();
+    h2o_hostinfo_max_threads = H2O_DEFAULT_NUM_NAME_RESOLUTION_THREADS;
     setup_configurators();
 
     { /* parse options */
@@ -1239,7 +1287,7 @@ int main(int argc, char **argv)
     }
 
     /* setup conf.server_starter */
-    if ((conf.server_starter.num_fds = h2o_server_starter_get_fds(&conf.server_starter.fds)) == -1)
+    if ((conf.server_starter.num_fds = h2o_server_starter_get_fds(&conf.server_starter.fds)) == SIZE_MAX)
         exit(EX_CONFIG);
     if (conf.server_starter.fds != 0)
         conf.server_starter.bound_fd_map = alloca(conf.server_starter.num_fds);

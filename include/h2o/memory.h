@@ -35,7 +35,7 @@ extern "C" {
 #define H2O_STRUCT_FROM_MEMBER(s, m, p) ((s *)((char *)(p)-offsetof(s, m)))
 
 #ifdef __GNUC__
-#define H2O_GNUC_VERSION ((__GNUC__ << 16) | (__GNUC__MINOR__ << 8) | __GNUC_PATCHLEVEL__)
+#define H2O_GNUC_VERSION ((__GNUC__ << 16) | (__GNUC_MINOR__ << 8) | __GNUC_PATCHLEVEL__)
 #else
 #define H2O_GNUC_VERSION 0
 #endif
@@ -49,8 +49,8 @@ extern "C" {
 #define H2O_NORETURN
 #endif
 
-#if !defined(__clang__) && defined(__GNUC__) && H2O_GNUC_VERSION >= 0x40802
-// returns_nonnull was seemingly not defined before gcc 4.8.2
+#if !defined(__clang__) && defined(__GNUC__) && H2O_GNUC_VERSION >= 0x40900
+// returns_nonnull was seemingly not defined before gcc 4.9 (exists in 4.9.1 but not in 4.8.2)
 #define H2O_RETURNS_NONNULL __attribute__((returns_nonnull))
 #else
 #define H2O_RETURNS_NONNULL
