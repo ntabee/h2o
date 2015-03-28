@@ -482,6 +482,11 @@ static int listener_setup_ssl(h2o_configurator_command_t *cmd, h2o_configurator_
         }
     }
 
+/* disable tls compression to avoid "CRIME" attacks (see http://en.wikipedia.org/wiki/CRIME) */
+#ifdef SSL_OP_NO_COMPRESSION
+    ssl_options |= SSL_OP_NO_COMPRESSION;
+#endif
+
     /* setup */
     init_openssl();
     ssl_ctx = SSL_CTX_new(SSLv23_server_method());
@@ -1055,7 +1060,11 @@ static void on_accept(h2o_socket_t *listener, int status)
     do {
         h2o_socket_t *sock;
         if (num_connections(0) >= conf.max_connections) {
-            /* the accepting socket is disactivated before entering the next in `run_loop` */
+            /* The accepting socket is disactivated before entering the next in `run_loop`.
+             * Note: it is possible that the server would accept at most `max_connections + num_threads` connections, since the
+             * server does not check if the number of connections has exceeded _after_ epoll notifies of a new connection _but_
+             * _before_ calling `accept`.  In other words t/40max-connections.t may fail.
+             */
             break;
         }
         if ((sock = h2o_evloop_socket_accept(listener)) == NULL) {
