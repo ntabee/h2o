@@ -134,7 +134,9 @@ static int do_pull(h2o_generator_t *_self, h2o_req_t *req, h2o_iovec_t *buf)
     return 1;
 }
 
-#include "tile-hook.c"
+/*--------------------*/
+#include "tile-hook.h"
+/*--------------------*/
 
 static struct st_h2o_sendfile_generator_t *create_generator(h2o_req_t *req, const char *path, size_t path_len, int *is_dir,
                                                             int flags)

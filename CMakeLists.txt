@@ -75,7 +75,11 @@ INCLUDE_DIRECTORIES(
     deps/picohttpparser
     deps/picotest
     deps/yaml/include
-    deps/yoml)
+    deps/yoml
+##############    
+    tile
+##############    
+    )
 
 SET(LIBYAML_SOURCE_FILES
     deps/yaml/src/api.c
@@ -278,3 +282,26 @@ ELSEIF (CMAKE_SYSTEM_NAME STREQUAL "Linux")
         TARGET_LINK_LIBRARIES(t-00unit-libuv.t "rt")
     ENDIF (WITH_BUNDLED_SSL)
 ENDIF (APPLE)
+
+
+##############    
+# tile-server helpers
+
+#   yield-tiles
+FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem thread program_options regex)
+
+INCLUDE_DIRECTORIES(
+    tile)
+SET(YIELD_TILES_SOURCE_FILES
+    tile/proj.cpp
+    tile/yield_tiles.cpp
+)
+ADD_EXECUTABLE(yield-tiles
+    ${YIELD_TILES_SOURCE_FILES})
+SET_TARGET_PROPERTIES(yield-tiles PROPERTIES COMPILE_FLAGS "-std=c++11")
+INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(yield-tiles ${Boost_LIBRARIES})
+
+INSTALL(TARGETS yield-tiles
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib)
