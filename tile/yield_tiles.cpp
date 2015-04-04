@@ -1,4 +1,29 @@
 
+// define before any includes
+#define BOOST_SPIRIT_THREADSAFE
+
+#include <mapnik/version.hpp>
+ 
+#include <mapnik/map.hpp>
+#include <mapnik/datasource_cache.hpp>
+#include <mapnik/font_engine_freetype.hpp>
+#include <mapnik/agg_renderer.hpp>
+#include <mapnik/expression.hpp>
+#include <mapnik/color_factory.hpp>
+#if MAPNIK_MAJOR_VERSION >= 3
+ #include <mapnik/image.hpp>
+ #define image_32 image_rgba8
+#else
+ #include <mapnik/graphics.hpp>
+#endif
+#include <mapnik/image_util.hpp>
+#include <mapnik/config_error.hpp>
+#include <mapnik/load_map.hpp>
+#include <mapnik/box2d.hpp>
+#include <dirent.h>
+#include <syslog.h>
+#include <sys/stat.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -17,37 +42,12 @@
 #include <boost/thread/thread.hpp>
 #include <boost/lockfree/queue.hpp>
 #include <boost/atomic.hpp>
+#include <boost/timer/timer.hpp>
 #include "proj.hpp"
 #include "path-mapper.h"
+#include "git-revision.h"
 
-static double strtod_wrapper(char* str) {
-    // cf. http://stackoverflow.com/a/5581058
-    char *err;
-    double d = strtod(str, &err);
-    if (*err == 0) { 
-        /* very probably ok */ 
-        return d;
-    }
-    if (!isspace((unsigned char)*err)) { 
-        /* error */ 
-        return HUGE_VAL;
-    }
-    return d;
-}
-
-static long strtol_wrapper(char* str) {
-    char *err;
-    long v = strtol(str, &err, 10);
-    if (*err == 0) { 
-        /* very probably ok */ 
-        return v;
-    }
-    if (!isspace((unsigned char)*err)) { 
-        /* error */ 
-        return LONG_MAX;
-    }
-    return v;
-}
+#define VERSION "0.0.0"
 
 void mkdir_p(const boost::filesystem::path& base_path) {
     if (boost::filesystem::exists(base_path)) {
@@ -89,24 +89,74 @@ static inline void unpack(triplet val, uint32_t& z, uint32_t& x, uint32_t& y) {
     z = (uint32_t)(val & 0xFFFF);
 }
 boost::lockfree::queue<triplet> queue(1024);
-boost::atomic<uint64_t> rendered(0);
 boost::atomic<bool> done (false);
+boost::atomic<uint64_t> rendered(0);    // # of tiles already done.
+uint64_t total_tiles;   // # of tiles to render, set in main() and invariant during the execution
+bool skip_existing;     // If true, avoid overwriting existing tiles; set in main() and invariant.
 
 void renderer(const boost::filesystem::path& xml, const boost::filesystem::path& base_path) {
-    boost::filesystem::path tile_path;
+    using namespace mapnik;
+    Map m(TILE_SIZE, TILE_SIZE);
+    mapnik::load_map(m, xml.string());
+    image_32 buf(m.width(),m.height());
+
+    const std::string& base_as_string = base_path.string();
+    size_t base_len  = base_as_string.length();
+
+    // tile_path holds the full path base_path/nnn/.../nnn.png to render
+    char* tile_path = (char*)alloca(base_len + 28);
+    strncpy(tile_path, base_as_string.c_str(), base_len);
+
+    // tp_head points to the end of base_path in tile_path
+    char* tp_head = tile_path + base_len;
+    if (tile_path[base_len-1] != '/') {
+        tile_path[base_len] = '/';
+        ++tp_head;
+    }
+
+    double l, t, r, b; // (left, top)-(right, bottom) in Mercator projection.
+#define INC_COUNT() { \
+    uint64_t v = ++rendered; \
+    if (v % 1000 == 0) { printf("%ld/%ld done.\n", v, total_tiles); } \
+}
+
+#if MAPNIK_MAJOR_VERSION >= 3 
+    #define SAVE(buf, to) save_to_file(buf, to, "png")
+#else
+    #define SAVE(buf, to) save_to_file<image_data_32>(buf.data(), to, "png")
+#endif 
+
+#define EXISTS(p) boost::filesystem::exists(p)
+#define DO_RENDER() { \
+    unpack(tile_id, z, x, y); \
+    to_physical_path(tp_head, z, x, y, PNG); \
+    boost::filesystem::path boost_tile_path = boost::filesystem::path(tile_path); \
+    if (!skip_existing || !EXISTS(boost_tile_path)) /* <=> not (skip && exists(tile_path)) */ { \
+        tile_to_merc_box(z, x, y, l, t, r, b); \
+        mkdir_p(boost_tile_path.parent_path()); \
+        m.zoom_to_box(mapnik::box2d<double>(l, t, r, b)); \
+        agg_renderer<image_32> ren(m,buf); \
+        ren.apply(); \
+        SAVE(buf, tile_path); \
+    } \
+    INC_COUNT(); \
+} // DO_RENDER()
+
     triplet tile_id;
+    uint32_t z, x, y;
     while (!done) {
         while (queue.pop(tile_id)) {
-
+            DO_RENDER();
         }
     }
 
     while (queue.pop(tile_id)) {
-
+        DO_RENDER()
     }
 }
 
 namespace argv {
+    // argv parser for --zoom=z1-z2
     namespace zoom {
         struct pair_t {
         public:
@@ -119,7 +169,7 @@ namespace argv {
         {
             namespace po = boost::program_options;
 
-            static boost::regex r("(\\d{1,2})(-|,)(\\d{1,2})");
+            static boost::regex r("(\\d+)(-|,)(\\d+)");
 
             // Make sure no previous assignment to 'v' was made.
             po::validators::check_first_occurrence(v);
@@ -138,6 +188,7 @@ namespace argv {
         }
     }
 
+    // ... and for --bbox=x1,y1,x2,y2
     namespace bbox {
         struct box_t {
         public:
@@ -176,6 +227,37 @@ namespace argv {
     }
 }
 
+static void load_fonts(const char *font_dir) {
+    DIR *fonts = opendir(font_dir);
+    struct dirent *entry;
+    char path[PATH_MAX]; // FIXME: Eats lots of stack space when recursive
+
+    if (!fonts) {
+        syslog(LOG_CRIT, "Unable to open font directory: %s", font_dir);
+        return;
+    }
+
+    while ((entry = readdir(fonts))) {
+        struct stat b;
+        char *p;
+
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+        snprintf(path, sizeof(path), "%s/%s", font_dir, entry->d_name);
+        if (stat(path, &b))
+            continue;
+        if (S_ISDIR(b.st_mode)) {
+            load_fonts(path);
+            continue;
+        }
+        p = strrchr(path, '.');
+        if (p && !strcmp(p, ".ttf")) {
+            syslog(LOG_DEBUG, "DEBUG: Loading font: %s", path);
+            mapnik::freetype_engine::register_font(path);
+        }
+    }
+    closedir(fonts);
+}
 
 
 /*
@@ -203,11 +285,10 @@ int main(int ac, char** av) {
     try { 
         std::string config;
         std::string base;
-//        argv::zoom zoom_levels(std::tuple<uint32_t, uint32_t>(0, 16));
         argv::zoom::pair_t zoom_levels;
         argv::bbox::box_t  bbox;
         unsigned int nthreads;
-        bool skip_existing;
+        bool dry_run = false;
         /** Define and parse the program options 
         */ 
         namespace po = boost::program_options; 
@@ -217,7 +298,8 @@ int main(int ac, char** av) {
             "Options"
         ); 
         desc.add_options() 
-            ("help,h", "Prints help messages") 
+            ("help,h", "Prints help messages")
+            ("version,v", "Prints version info.")
             ("config,c", po::value<std::string>(&config)->value_name("render-def.xml")->required(), "Specifies a mapnik config file (such as of openstreetmap-carto)") 
             ("prefix,p", po::value<std::string>(&base)->value_name("base-path")->required(), "Specifies the base directory into which tile are rendered") 
             ("zoom,z", 
@@ -234,24 +316,42 @@ int main(int ac, char** av) {
                 "Specifies the number of threas to render\n"
                 "  + defaults to boost::thread::hardware_concurrency()-1") 
             ("skip-existing,s", 
-                po::value<bool>(&skip_existing)->value_name("yes|no")->default_value(false, "no"), 
-                "Specifies an overwriting policy:\n"
-                "  + if yes, existing tiles are not re-rendered\n"
-                "  + if no, every tile within the specified region (by -z and -b) is unconditionally overwritten\n"
-                "  + defaults to 'no'") 
+                "Avoids re-rendering existing tiles") 
+            ("dry-run,d", 
+                "Only estimates the number of tiles, does not actually render\n") 
         ;   // add_options();
+        if (ac <= 1) {
+            // No options are given.
+            // Just print the usage w.o. error messages.
+            std::cerr << desc;
+            return 0;
+        }
         po::variables_map vm; 
 
         try { 
             po::store(po::command_line_parser(ac, av).options(desc).run(), vm); // throws on error 
 
-            /** --help option 
-            */ 
+            // --help
             if ( vm.count("help")  ) { 
                 std::cerr << desc;
                 return 0; 
             } 
 
+            if ( vm.count("version") ) {
+                std::cout << (
+                    VERSION " (commit: " GIT_REVISION ")"                    
+                ) << std::endl;
+                return 0;
+            }
+
+            // --skip-existing
+            if ( vm.count("skip-existing") ) {
+                skip_existing = true;
+            }
+            // --dry-run
+            if ( vm.count("dry-run") ) {
+                dry_run = true;
+            }
             po::notify(vm); // throws on error, so do after help in case 
                             // there are any problems 
         } catch(po::required_option& e) { 
@@ -285,6 +385,110 @@ int main(int ac, char** av) {
             return -1;
         }
 
+#define CHECK_RANGE(val, v1, v2) if (val < v1 || val > v2) { \
+    std::cerr << "Error: " << (#val) << " = " << (val) << " is out of the range, must be in [" << (v1) << ", " << (v2) << "]" << std::endl; \
+    return -1; \
+}
+
+        // Ensure zoom levels are in the valid range
+        uint32_t z1 = zoom_levels.z1, z2 = zoom_levels.z2;
+        CHECK_RANGE(z1, 0, 20)
+        CHECK_RANGE(z2, 0, 20)
+
+        if (z1 > z2) {
+            std::swap(z1, z2);
+        }
+
+        // and so are bbox coordinates...
+
+        // Mercator projection limits the lat value to this, cf. http://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#X_and_Y
+        constexpr double LAT_LIMIT = 85.0511;
+        double x1 = bbox.x1,
+               y1 = bbox.y1,
+               x2 = bbox.x2,
+               y2 = bbox.y2;
+        CHECK_RANGE(x1, -180.0, 180.0)        
+        CHECK_RANGE(x2, -180.0, 180.0)        
+        // The magic number 85.0511 is quite counter-intuitive, let us accept any deg. as inputs and then fit them below
+        CHECK_RANGE(y1, -90.0, 90.0)        
+        CHECK_RANGE(y2, -90.0, 90.0)
+
+        // Ensure values are in ascening order.
+        if (x1 > x2) {
+            std::swap(x1, x2);
+        }
+        // The y-axis of the Spherical Mercator spans north-to-south, hence smaller lat values (southern points) are mapped to larger tile IDs.
+        // To assure the output to be in ascending order, we force y1 >= y2 (not y1 <= y2.)
+        if (y1 < y2) {
+            std::swap(y1, y2);
+        }
+        std::cout 
+            << "Now rendering begins:" << std::endl
+            << "  Base path   : " << base_path.string() << std::endl
+            << "  Mapnik conf.: " << xml.string() << std::endl
+            << "  Zoom levels : " << (boost::format("%1% - %2%") % z1 % z2) << std::endl
+            << "  Bounding box: " << (boost::format("(%1%,%2%)-(%3%,%4%)") % x1 % y1 % x2 % y2) << std::endl
+        ;
+        // Tweak lat/lon values so that they fit in their "actual" range.
+        // To be strict, the range of lon. values is [-180, 180), so exact 180.0 should be "shifted just a little"
+        x1 = std::min(x1, 180.0 - 0.0000001);
+        x2 = std::min(x2, 180.0 - 0.0000001);
+        // and lat. values are limited to +-85.0511 rather than 90.0, as explained.
+        y1 = std::max(-LAT_LIMIT, std::min(y1, LAT_LIMIT));
+        y2 = std::max(-LAT_LIMIT, std::min(y2, LAT_LIMIT));
+
+        boost::timer::auto_cpu_timer timer;
+        // Count # of tiles to render
+        std::cout 
+            << "  # of tiles  : " << std::endl
+        ;
+        uint32_t tx_left, ty_top, tx_right, ty_bottom;
+        for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
+            lonlat_to_tile(x1, y1, z, tx_left, ty_top);
+            lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
+
+            uint64_t rows = (uint64_t)(ty_bottom - ty_top + 1);
+            uint64_t cols = (uint64_t)(tx_right - tx_left + 1);
+            uint64_t tiles = rows * cols;
+            total_tiles += tiles;
+            std::cout 
+                << "    Zoom " << (boost::format("%|2|") % z) << ": " << tiles << std::endl;
+        }
+        std::cout 
+            << "    Total  : " << total_tiles << std::endl
+        ;
+
+        if (dry_run) {
+            return 0;
+        }
+
+        // FIXME: Paths should be coufigurable.
+        using namespace mapnik;
+        datasource_cache::instance().register_datasources("/usr/local/lib/mapnik/input");
+        load_fonts("/usr/local/lib/mapnik/fonts");
+        load_fonts("/usr/share/fonts");
+
+        // Awake renderer threads
+        boost::thread_group consumer_threads;
+        for (int i = 0; i != nthreads; ++i)
+            consumer_threads.create_thread(boost::bind(renderer, xml, base_path));
+
+        // Emit!
+        for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
+            lonlat_to_tile(x1, y1, z, tx_left, ty_top);
+            lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
+            for (uint32_t y = ty_top; y <= ty_bottom; ++y) {
+                for (uint32_t x = tx_left; x <= tx_right; ++x) {
+                    queue.push(pack(z, x, y));
+                }
+            }
+        }
+        done = true;
+        consumer_threads.join_all();        
+
+        std::cout 
+            << "Completed!" << std::endl
+        ;
     } catch(std::exception& e) { 
         std::cerr << "Unhandled Exception reached the top of main: " 
               << e.what() << ", application will now exit" << std::endl; 
