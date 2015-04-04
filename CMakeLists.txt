@@ -287,20 +287,31 @@ ENDIF (APPLE)
 ##############    
 # tile-server helpers
 
+LINK_DIRECTORIES(
+    /usr/local/lib
+)
+INCLUDE_DIRECTORIES(
+    /usr/local/include
+)
+
+ADD_CUSTOM_COMMAND(OUTPUT include/git-revision.h DEPENDS .git/HEAD .git/index COMMAND /bin/sh gen-git-revision.sh > $@)
 #   yield-tiles
-FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem thread program_options regex)
+FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem thread program_options regex timer)
+FIND_PACKAGE(mapnik REQUIRED)
+FIND_PACKAGE(icuuc REQUIRED)
 
 INCLUDE_DIRECTORIES(
     tile)
 SET(YIELD_TILES_SOURCE_FILES
     tile/proj.cpp
     tile/yield_tiles.cpp
+    include/git-revision.h
 )
 ADD_EXECUTABLE(yield-tiles
     ${YIELD_TILES_SOURCE_FILES})
 SET_TARGET_PROPERTIES(yield-tiles PROPERTIES COMPILE_FLAGS "-std=c++11")
 INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
-TARGET_LINK_LIBRARIES(yield-tiles ${Boost_LIBRARIES})
+TARGET_LINK_LIBRARIES(yield-tiles ${Boost_LIBRARIES} ${MAPNIK_LIBRARIES} ${ICUUC_LIBRARIES})
 
 INSTALL(TARGETS yield-tiles
     RUNTIME DESTINATION bin
