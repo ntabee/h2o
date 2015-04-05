@@ -303,9 +303,9 @@ FIND_PACKAGE(icuuc REQUIRED)
 INCLUDE_DIRECTORIES(
     tile)
 SET(YIELD_TILES_SOURCE_FILES
-    tile/proj.cpp
-    tile/yield_tiles.cpp
     include/git-revision.h
+    tile/proj.hpp
+    tile/yield_tiles.cpp
 )
 ADD_EXECUTABLE(yield-tiles
     ${YIELD_TILES_SOURCE_FILES})
