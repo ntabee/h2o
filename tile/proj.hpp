@@ -34,7 +34,6 @@ let proj_lonlat(mx, my) =
 assert(proj_lonlat(proj(3638, 1612, 12)) = (139.74609375000003, 35.74651225991853))
 */
 static inline void tile_to_merc(uint32_t zoom, uint32_t x, uint32_t y, double& mx, double& my) {
-//    constexpr int TILE_SIZE = 256;
     constexpr double INITIAL_RESOLUTION = 2*M_PI * 6378137 / TILE_SIZE;
     constexpr double ORIGIN_SHIFT = 2*M_PI * 6378137/2.0;
 
@@ -44,7 +43,6 @@ static inline void tile_to_merc(uint32_t zoom, uint32_t x, uint32_t y, double& m
 }
 
 static inline void tile_to_merc_box(uint32_t zoom, uint32_t x, uint32_t y, double& left, double& top, double& right, double& bot) {
-//    constexpr int TILE_SIZE = 256;
     constexpr double INITIAL_RESOLUTION = 2*M_PI * 6378137 / TILE_SIZE;
     constexpr double ORIGIN_SHIFT = 2*M_PI * 6378137/2.0;
 
