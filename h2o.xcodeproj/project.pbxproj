@@ -30,6 +30,8 @@
 		105534EB1A42A87E00627ECB /* _templates.c.h in Headers */ = {isa = PBXBuildFile; fileRef = 105534EA1A42A87E00627ECB /* _templates.c.h */; };
 		105534ED1A42AD5E00627ECB /* templates.c.h in Headers */ = {isa = PBXBuildFile; fileRef = 105534EC1A42AD5E00627ECB /* templates.c.h */; };
 		105534EF1A440FC800627ECB /* config.c in Sources */ = {isa = PBXBuildFile; fileRef = 105534EE1A440FC800627ECB /* config.c */; };
+		10583BF11AE5A37B004A3AD6 /* Makefile in Sources */ = {isa = PBXBuildFile; fileRef = 10583BED1AE5A37B004A3AD6 /* Makefile */; };
+		10583BF21AE5A37B004A3AD6 /* README.md in Sources */ = {isa = PBXBuildFile; fileRef = 10583BEE1AE5A37B004A3AD6 /* README.md */; };
 		1058C87D1AA41789008D6180 /* headers.c in Sources */ = {isa = PBXBuildFile; fileRef = 1058C87C1AA41789008D6180 /* headers.c */; };
 		1058C87E1AA41A1F008D6180 /* headers.c in Sources */ = {isa = PBXBuildFile; fileRef = 10AA2EBD1AA019D8004322AC /* headers.c */; };
 		1058C8881AA6DE4B008D6180 /* hostinfo.h in Headers */ = {isa = PBXBuildFile; fileRef = 1058C8871AA6DE4B008D6180 /* hostinfo.h */; };
@@ -85,6 +87,7 @@
 		1079245119A3266700C52AD6 /* token.c in Sources */ = {isa = PBXBuildFile; fileRef = 107923BF19A3217300C52AD6 /* token.c */; };
 		1079245219A3266700C52AD6 /* util.c in Sources */ = {isa = PBXBuildFile; fileRef = 107923C019A3217300C52AD6 /* util.c */; };
 		1079245419A32C0800C52AD6 /* token_table.h in Headers */ = {isa = PBXBuildFile; fileRef = 1079245319A32C0800C52AD6 /* token_table.h */; };
+		108867751AD9069900987967 /* defaults.c.h in Headers */ = {isa = PBXBuildFile; fileRef = 108867741AD9069900987967 /* defaults.c.h */; };
 		10AA2E941A80A592004322AC /* time_.h in Headers */ = {isa = PBXBuildFile; fileRef = 10AA2E931A80A592004322AC /* time_.h */; };
 		10AA2E961A80A612004322AC /* time.c in Sources */ = {isa = PBXBuildFile; fileRef = 10AA2E951A80A612004322AC /* time.c */; };
 		10AA2E991A81F68A004322AC /* time.c in Sources */ = {isa = PBXBuildFile; fileRef = 10AA2E981A81F68A004322AC /* time.c */; };
@@ -257,6 +260,25 @@
 		105534FA1A460F4200627ECB /* 50sni.t */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = 50sni.t; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.perl; };
 		105534FB1A460F4200627ECB /* Util.pm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.perl; path = Util.pm; sourceTree = "<group>"; };
 		105534FE1A46134A00627ECB /* 80issues61.t */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = 80issues61.t; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.perl; };
+		10583BE01AE5A222004A3AD6 /* wrapper.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = wrapper.mt; sourceTree = "<group>"; };
+		10583BE11AE5A22D004A3AD6 /* configure.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = configure.mt; sourceTree = "<group>"; };
+		10583BE21AE5A22D004A3AD6 /* faq.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = faq.mt; sourceTree = "<group>"; };
+		10583BE31AE5A22D004A3AD6 /* index.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = index.mt; sourceTree = "<group>"; };
+		10583BE41AE5A22D004A3AD6 /* install.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = install.mt; sourceTree = "<group>"; };
+		10583BE61AE5A322004A3AD6 /* clang-format-all.sh */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = "clang-format-all.sh"; sourceTree = "<group>"; };
+		10583BE71AE5A322004A3AD6 /* install-perl-module.pl */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.perl; path = "install-perl-module.pl"; sourceTree = "<group>"; };
+		10583BE81AE5A330004A3AD6 /* libressl.mk */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = libressl.mk; sourceTree = "<group>"; };
+		10583BE91AE5A330004A3AD6 /* makedoc.pl */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.perl; path = makedoc.pl; sourceTree = "<group>"; };
+		10583BEA1AE5A341004A3AD6 /* picotemplate-conf.pl */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.perl; path = "picotemplate-conf.pl"; sourceTree = "<group>"; };
+		10583BEB1AE5A341004A3AD6 /* regen-all.sh */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = "regen-all.sh"; sourceTree = "<group>"; };
+		10583BED1AE5A37B004A3AD6 /* Makefile */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.make; path = Makefile; sourceTree = "<group>"; };
+		10583BEE1AE5A37B004A3AD6 /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		10583BF51AE765E0004A3AD6 /* command_options.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = command_options.mt; sourceTree = "<group>"; };
+		10583BF61AE765E0004A3AD6 /* quick_start.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = quick_start.mt; sourceTree = "<group>"; };
+		10583BF81AE783BE004A3AD6 /* remotebench.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = remotebench.png; path = assets/remotebench.png; sourceTree = "<group>"; };
+		10583BF91AE783BE004A3AD6 /* searchstyle.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; name = searchstyle.css; path = assets/searchstyle.css; sourceTree = "<group>"; };
+		10583BFA1AE783BE004A3AD6 /* style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; name = style.css; path = assets/style.css; sourceTree = "<group>"; };
+		10583BFB1AE78DCC004A3AD6 /* syntax_and_structure.mt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = syntax_and_structure.mt; sourceTree = "<group>"; };
 		1058C87C1AA41789008D6180 /* headers.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = headers.c; sourceTree = "<group>"; };
 		1058C87F1AA42568008D6180 /* 50headers.t */ = {isa = PBXFileReference; lastKnownFileType = text; path = 50headers.t; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.perl; };
 		1058C8871AA6DE4B008D6180 /* hostinfo.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = hostinfo.h; sourceTree = "<group>"; };
@@ -325,6 +347,7 @@
 		1082150C1AB26F4700D27E66 /* FindWslay.cmake */ = {isa = PBXFileReference; lastKnownFileType = text; path = FindWslay.cmake; sourceTree = "<group>"; };
 		1082150D1AB26F4700D27E66 /* FindLibYAML.cmake */ = {isa = PBXFileReference; lastKnownFileType = text; path = FindLibYAML.cmake; sourceTree = "<group>"; };
 		1082150E1AB26F4700D27E66 /* FindLibUV.cmake */ = {isa = PBXFileReference; lastKnownFileType = text; path = FindLibUV.cmake; sourceTree = "<group>"; };
+		108867741AD9069900987967 /* defaults.c.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = defaults.c.h; sourceTree = "<group>"; };
 		10AA2E931A80A592004322AC /* time_.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = time_.h; sourceTree = "<group>"; };
 		10AA2E951A80A612004322AC /* time.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = time.c; sourceTree = "<group>"; };
 		10AA2E981A81F68A004322AC /* time.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = time.c; sourceTree = "<group>"; };
@@ -483,6 +506,7 @@
 				105534E91A42A83700627ECB /* file */,
 				10AA2EBD1AA019D8004322AC /* headers.c */,
 				107923BB19A3217300C52AD6 /* mimemap.c */,
+				108867731AD9061100987967 /* mimemap */,
 				10D0907219F633B00043D458 /* proxy.c */,
 				10AA2EA41A8D9999004322AC /* redirect.c */,
 				10AA2EC31AA0403A004322AC /* reproxy.c */,
@@ -590,6 +614,57 @@
 			path = file;
 			sourceTree = "<group>";
 		};
+		10583BDB1AE5A1E3004A3AD6 /* srcdoc */ = {
+			isa = PBXGroup;
+			children = (
+				10583BF31AE764A7004A3AD6 /* configure */,
+				10583BE11AE5A22D004A3AD6 /* configure.mt */,
+				10583BE21AE5A22D004A3AD6 /* faq.mt */,
+				10583BE31AE5A22D004A3AD6 /* index.mt */,
+				10583BE41AE5A22D004A3AD6 /* install.mt */,
+				10583BDC1AE5A20A004A3AD6 /* snippets */,
+			);
+			path = srcdoc;
+			sourceTree = "<group>";
+		};
+		10583BDC1AE5A20A004A3AD6 /* snippets */ = {
+			isa = PBXGroup;
+			children = (
+				10583BE01AE5A222004A3AD6 /* wrapper.mt */,
+			);
+			path = snippets;
+			sourceTree = "<group>";
+		};
+		10583BEC1AE5A353004A3AD6 /* doc */ = {
+			isa = PBXGroup;
+			children = (
+				10583BF71AE783AB004A3AD6 /* assets */,
+				10583BED1AE5A37B004A3AD6 /* Makefile */,
+				10583BEE1AE5A37B004A3AD6 /* README.md */,
+			);
+			path = doc;
+			sourceTree = "<group>";
+		};
+		10583BF31AE764A7004A3AD6 /* configure */ = {
+			isa = PBXGroup;
+			children = (
+				10583BFB1AE78DCC004A3AD6 /* syntax_and_structure.mt */,
+				10583BF51AE765E0004A3AD6 /* command_options.mt */,
+				10583BF61AE765E0004A3AD6 /* quick_start.mt */,
+			);
+			path = configure;
+			sourceTree = "<group>";
+		};
+		10583BF71AE783AB004A3AD6 /* assets */ = {
+			isa = PBXGroup;
+			children = (
+				10583BF81AE783BE004A3AD6 /* remotebench.png */,
+				10583BF91AE783BE004A3AD6 /* searchstyle.css */,
+				10583BFA1AE783BE004A3AD6 /* style.css */,
+			);
+			name = assets;
+			sourceTree = "<group>";
+		};
 		1065E6F319B9969000686E72 /* evloop */ = {
 			isa = PBXGroup;
 			children = (
@@ -649,11 +724,13 @@
 				1082150B1AB26F2F00D27E66 /* cmake */,
 				1082150A1AB26F2A00D27E66 /* CMakeLists.txt */,
 				1079231E19A3210D00C52AD6 /* deps */,
+				10583BEC1AE5A353004A3AD6 /* doc */,
 				1079239E19A3215F00C52AD6 /* include */,
 				107923AD19A3217300C52AD6 /* lib */,
 				107923AA19A3216B00C52AD6 /* misc */,
 				104B9A3F1A5CD684009EEE64 /* share */,
 				10F417D419C190DD00B6E31A /* src */,
+				10583BDB1AE5A1E3004A3AD6 /* srcdoc */,
 				10D0906D19F494990043D458 /* t */,
 				107923FE19A3239200C52AD6 /* examples */,
 				1079231619A320A700C52AD6 /* Products */,
@@ -743,6 +820,12 @@
 		107923AA19A3216B00C52AD6 /* misc */ = {
 			isa = PBXGroup;
 			children = (
+				10583BE61AE5A322004A3AD6 /* clang-format-all.sh */,
+				10583BE71AE5A322004A3AD6 /* install-perl-module.pl */,
+				10583BE81AE5A330004A3AD6 /* libressl.mk */,
+				10583BE91AE5A330004A3AD6 /* makedoc.pl */,
+				10583BEA1AE5A341004A3AD6 /* picotemplate-conf.pl */,
+				10583BEB1AE5A341004A3AD6 /* regen-all.sh */,
 				107923AB19A3216B00C52AD6 /* tokens.pl */,
 			);
 			path = misc;
@@ -799,6 +882,14 @@
 				1082150E1AB26F4700D27E66 /* FindLibUV.cmake */,
 			);
 			path = cmake;
+			sourceTree = "<group>";
+		};
+		108867731AD9061100987967 /* mimemap */ = {
+			isa = PBXGroup;
+			children = (
+				108867741AD9069900987967 /* defaults.c.h */,
+			);
+			path = mimemap;
 			sourceTree = "<group>";
 		};
 		10AA2EC51AA0557A004322AC /* assets */ = {
@@ -917,6 +1008,7 @@
 				107923A619A3215F00C52AD6 /* http2.h in Headers */,
 				107923A719A3215F00C52AD6 /* token.h in Headers */,
 				107923A919A3215F00C52AD6 /* h2o.h in Headers */,
+				108867751AD9069900987967 /* defaults.c.h in Headers */,
 				1058C8881AA6DE4B008D6180 /* hostinfo.h in Headers */,
 				10AA2E941A80A592004322AC /* time_.h in Headers */,
 				107923A519A3215F00C52AD6 /* http1.h in Headers */,
@@ -1118,6 +1210,7 @@
 				1058C87E1AA41A1F008D6180 /* headers.c in Sources */,
 				10AA2E961A80A612004322AC /* time.c in Sources */,
 				107923C319A3217300C52AD6 /* file.c in Sources */,
+				10583BF11AE5A37B004A3AD6 /* Makefile in Sources */,
 				107923CD19A3217300C52AD6 /* memory.c in Sources */,
 				107923CC19A3217300C52AD6 /* context.c in Sources */,
 				10AA2EC21AA0402E004322AC /* reproxy.c in Sources */,
@@ -1145,6 +1238,7 @@
 				10E299581A67E68500701AA6 /* scheduler.c in Sources */,
 				107923D319A3217300C52AD6 /* util.c in Sources */,
 				105534CA1A3BB46900627ECB /* string.c in Sources */,
+				10583BF21AE5A37B004A3AD6 /* README.md in Sources */,
 				105534DF1A3C7B9800627ECB /* proxy.c in Sources */,
 				105534DD1A3C7AA900627ECB /* file.c in Sources */,
 			);
