@@ -305,6 +305,8 @@ INCLUDE_DIRECTORIES(
 SET(YIELD_TILES_SOURCE_FILES
     include/git-revision.h
     tile/proj.hpp
+    tile/blank-ocean.h
+    tile/blank-land.h
     tile/yield_tiles.cpp
 )
 ADD_EXECUTABLE(yield-tiles

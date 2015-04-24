@@ -17,6 +17,8 @@
  #include <mapnik/graphics.hpp>
 #endif
 #include <mapnik/image_util.hpp>
+#include <mapnik/image_view.hpp>
+#include <mapnik/image_view_any.hpp>
 #include <mapnik/config_error.hpp>
 #include <mapnik/load_map.hpp>
 #include <mapnik/box2d.hpp>
@@ -32,6 +34,7 @@
 #include <strings.h>
 #include <algorithm>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <tuple>
 #include <boost/filesystem.hpp>
@@ -45,8 +48,8 @@
 #include <boost/timer/timer.hpp>
 #include "proj.hpp"
 #include "path-mapper.h"
-#include "git-revision.h"
 
+#include "git-revision.h"
 #define VERSION "0.0.0"
 
 void mkdir_p(const boost::filesystem::path& base_path) {
@@ -62,9 +65,6 @@ void mkdir_p(const boost::filesystem::path& base_path) {
     }
 }
 
-/*
-
-*/
 // typedef std::tuple<uint32_t, uint32_t, uint32_t> triplet;
 // Since boost::lockfree::queue supports only a type that "has_trivial_assign", 
 // we encode a triple (zoom, x, y) into a single 64bit value divided as (16, 24, 24)-bits.
@@ -88,17 +88,17 @@ static inline void unpack(triplet val, uint32_t& z, uint32_t& x, uint32_t& y) {
     val >>= 24;
     z = (uint32_t)(val & 0xFFFF);
 }
-boost::lockfree::queue<triplet> queue(1024);
+boost::lockfree::queue<triplet, boost::lockfree::capacity<1024>> queue;
 boost::atomic<bool> done (false);
-boost::atomic<uint64_t> rendered(0);    // # of tiles already done.
+boost::atomic<uint64_t> rendered(0);    // # of tiles already done (including those skipped).
+boost::atomic<uint64_t> skipped(0);     // # of tiles skipped.
 uint64_t total_tiles;   // # of tiles to render, set in main() and invariant during the execution
 bool skip_existing;     // If true, avoid overwriting existing tiles; set in main() and invariant.
 
 void renderer(const boost::filesystem::path& xml, const boost::filesystem::path& base_path) {
     using namespace mapnik;
-    Map m(TILE_SIZE, TILE_SIZE);
+    Map m(TILE_SIZE*2, TILE_SIZE*2);    // To avoid label scattering, we render a 2x2 larger area and then clip the center.
     mapnik::load_map(m, xml.string());
-    image_32 buf(m.width(),m.height());
 
     const std::string& base_as_string = base_path.string();
     size_t base_len  = base_as_string.length();
@@ -114,30 +114,41 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
         ++tp_head;
     }
 
-    double l, t, r, b; // (left, top)-(right, bottom) in Mercator projection.
+
+    image_32 image(m.width(),m.height());
+    agg_renderer<image_32> ren(m,image);
+    /* (left, top)-(right, bottom) in Mercator projection. */ 
+    double l, t, r, b; 
+
 #define INC_COUNT() { \
     uint64_t v = ++rendered; \
-    if (v % 1000 == 0) { printf("%ld/%ld done.\n", v, total_tiles); } \
+    if (v % 1000 == 0) { \
+        uint64_t s = skipped; \
+        /* cout << XX << ... is not atomic */ \
+        printf("%ld/%ld done. (%ld skipped)\n", v, total_tiles, s); \
+    } \
 }
-
-#if MAPNIK_MAJOR_VERSION >= 3 
-    #define SAVE(buf, to) save_to_file(buf, to, "png")
-#else
-    #define SAVE(buf, to) save_to_file<image_data_32>(buf.data(), to, "png")
-#endif 
-
+#define SAVE(vw, to) { save_to_file(image_view_any(vw), to, "png256"); }
 #define EXISTS(p) boost::filesystem::exists(p)
-#define DO_RENDER() { \
+#define DO_RENDER(tile_id) { \
     unpack(tile_id, z, x, y); \
     to_physical_path(tp_head, z, x, y, PNG); \
     boost::filesystem::path boost_tile_path = boost::filesystem::path(tile_path); \
-    if (!skip_existing || !EXISTS(boost_tile_path)) /* <=> not (skip && exists(tile_path)) */ { \
-        tile_to_merc_box(z, x, y, l, t, r, b); \
+    if ( !(skip_existing && EXISTS(boost_tile_path)) )  { \
         mkdir_p(boost_tile_path.parent_path()); \
-        m.zoom_to_box(mapnik::box2d<double>(l, t, r, b)); \
-        agg_renderer<image_32> ren(m,buf); \
+        tile_to_merc_box(z, x, y, l, t, r, b); \
+        box2d<double> bbox(l, t, r, b); \
+        /* Double the bbox */ \
+        bbox.width(bbox.width() * 2); \
+        bbox.height(bbox.height() * 2); \
+        /* Render */ \
+        m.zoom_to_box(bbox); \
         ren.apply(); \
-        SAVE(buf, tile_path); \
+        /* Clip the center 256x256 into vw */ \
+        image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); \
+        SAVE(vw, tile_path); \
+    } else { \
+        ++skipped; \
     } \
     INC_COUNT(); \
 } // DO_RENDER()
@@ -146,12 +157,12 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
     uint32_t z, x, y;
     while (!done) {
         while (queue.pop(tile_id)) {
-            DO_RENDER();
+            DO_RENDER(tile_id);
         }
     }
 
     while (queue.pop(tile_id)) {
-        DO_RENDER()
+        DO_RENDER(tile_id)
     }
 }
 
@@ -200,8 +211,6 @@ namespace argv {
                       box_t*, int)
         {
             namespace po = boost::program_options;
-
-            static boost::regex r("(\\d{1,2})(-|,)(\\d{1,2})");
 
             // Make sure no previous assignment to 'v' was made.
             po::validators::check_first_occurrence(v);
@@ -273,13 +282,15 @@ Options:
         + the pairs define the bounding box of rendering
         + defaults to (-180, 90)-(180, -90), i.e. the entire planet
     -t,--threads n: the number of threads to render
-        + defaults to boost::thread::hardware_concurrency() - 1
+        + defaults to boost::thread::hardware_concurrency()
     -s,--skip-existing yes|no: 
         + if yes, existing tiles are not re-rendered; 
         + if no, every tile within the specified region (by -z and -b) is unconditionally overwritten
         + defaults to "no"
-
-
+    -d,--dry-run
+        + only estimates the number of tiles, avoid actual rendering
+    -v,--version
+    -h,--help
 */
 int main(int ac, char** av) {
     try { 
@@ -312,9 +323,9 @@ int main(int ac, char** av) {
                 "Specifies the bounding box of rendering in lon/lat\n"
                 "  + defaults to (-180,90)-(180,-90), i.e. the entire planet.") 
             ("threads,t", 
-                po::value<unsigned int>(&nthreads)->value_name("n")->default_value(boost::thread::hardware_concurrency() - 1), 
+                po::value<unsigned int>(&nthreads)->value_name("n")->default_value(boost::thread::hardware_concurrency()), 
                 "Specifies the number of threas to render\n"
-                "  + defaults to boost::thread::hardware_concurrency()-1") 
+                "  + defaults to boost::thread::hardware_concurrency()") 
             ("skip-existing,s", 
                 "Avoids re-rendering existing tiles") 
             ("dry-run,d", 
@@ -479,7 +490,7 @@ int main(int ac, char** av) {
             lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
             for (uint32_t y = ty_top; y <= ty_bottom; ++y) {
                 for (uint32_t x = tx_left; x <= tx_right; ++x) {
-                    queue.push(pack(z, x, y));
+                    while (!queue.push(pack(z, x, y))) {}
                 }
             }
         }
@@ -496,112 +507,4 @@ int main(int ac, char** av) {
 
     } 
     return 0; 
-#if 0
-#define PRINT_USAGE() fprintf(stderr, "Usage: yield-tiles render-def.xml base-path z1 z2 x1 y1 x2 y2\n")
-    if (ac < 9) {
-        PRINT_USAGE();
-        return -1;
-    }
-
-    const boost::filesystem::path xml(av[1]);
-    if (!boost::filesystem::exists(xml)) {
-        fprintf(stderr, "Error: %s does not exist.", av[1]);
-        return -1;
-    } else {
-        boost::filesystem::path canonical = boost::filesystem::canonical(xml);
-        if (!boost::filesystem::is_regular_file(canonical)) {
-            fprintf(stderr, "Error: %s exists, but not a regular file.", av[1]);
-            return -1;
-        }
-    }
-    // mkdir -p base-path
-    const boost::filesystem::path base_path(av[2]);
-    try {
-        mkdir_p(base_path);
-    } catch (const boost::filesystem::filesystem_error& ex) {
-        fprintf(stderr, "Error: %s\n", ex.what());
-        return -1;
-    } catch (const std::exception& ex) {
-        fprintf(stderr, "Error: %s\n", ex.what());
-        return -1;
-    }
-
-    // Let's parse zoom levels...
-#define CHECK_RANGE_L(val, v1, v2, orig_in) if (val < v1 || val > v2) { \
-    PRINT_USAGE(); \
-    fprintf(stderr, "Error: %s must be in the range [%ld, %ld]. (Given: %s = %s, parsed as %ld.)\n", #val, v1, v2, #val, orig_in, val); \
-    return -1; \
-}
-#define PARSE_Z(var, str) long var = strtol_wrapper(str); CHECK_RANGE_L(var, 0L, 20L, str)
-
-    PARSE_Z(z1, av[3])
-    PARSE_Z(z2, av[4])
-
-    if (z1 > z2) {
-        std::swap(z1, z2);
-    }
-
-    // then, coordinates.
-#define CHECK_RANGE_D(val, v1, v2, orig_in) if (val < v1 || val > v2) { \
-    PRINT_USAGE(); \
-    fprintf(stderr, "Error: %s must be in the range [%f, %f]. (Given: %s = %s, parsed as %f.)\n", #val, v1, v2, #val, orig_in, val); \
-    return -1; \
-}
-#define PARSE_LON(var, str) double var = strtod_wrapper(str); CHECK_RANGE_D(var, -180.0, 180.0, str)
-
-// Mercator projection limits the lat value to this, cf. http://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#X_and_Y
-#define LAT_LIMIT 85.0511
-#define PARSE_LAT(var, str) double var = strtod_wrapper(str); CHECK_RANGE_D(var, -LAT_LIMIT, LAT_LIMIT, str)
-
-    PARSE_LON(x1, av[5]);
-    PARSE_LAT(y1, av[6]);
-    PARSE_LON(x2, av[7]);
-    PARSE_LAT(y2, av[8]);
-
-    if (x1 > x2) {
-        std::swap(x1, x2);
-    }
-
-    // The y-axis of the Spherical Mercator spans north-to-south, hence smaller lat values (southern points) are mapped to larger tile IDs.
-    // To assure the output to be in ascending order, we force y1 >= y2 (not y1 <= y2.)
-    if (y1 < y2) {
-        std::swap(y1, y2);
-    }
-    return 0;
-    // Emit!
-    char num_buf_z[18];
-    char num_buf_x[18];
-    char num_buf_y[18];
-
-    uint32_t tx_left, ty_top, tx_right, ty_bottom;
-    int t;
-    for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
-        lonlat_to_tile(x1, y1, z, tx_left, ty_top);
-        lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
-        // assert(tx_left <= tx_right);
-        // assert(ty_top <= ty_bottom);
-        for (uint32_t y = ty_top; y <= ty_bottom; ++y) {
-            for (uint32_t x = tx_left; x <= tx_right; ++x) {
-
-//              A faster alternative to printf("%d %d %d\n", z, x, y);
-                t = jiaendu::ufast_utoa10(z, num_buf_z);
-                num_buf_z[t] = ' ';
-                num_buf_z[t+1] = '\0';
-                fputs(num_buf_z, stdout);
-
-                t = jiaendu::ufast_utoa10(x, num_buf_x);
-                num_buf_x[t] = ' ';
-                num_buf_x[t+1] = '\0';
-                fputs(num_buf_x, stdout);
-
-                t = jiaendu::ufast_utoa10(y, num_buf_y);
-                num_buf_y[t] = '\n';
-                num_buf_y[t+1] = '\0';
-                fputs(num_buf_y, stdout);
-            }
-        }
-    }
-
-    return 0;
-#endif
 }
