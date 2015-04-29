@@ -328,6 +328,7 @@ INCLUDE_DIRECTORIES(
 
 ADD_CUSTOM_COMMAND(OUTPUT include/git-revision.h DEPENDS .git/HEAD .git/index COMMAND /bin/sh gen-git-revision.sh > $@)
 #   yield-tiles
+PROJECT(yield-tiles CXX)
 FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem thread program_options regex timer)
 FIND_PACKAGE(mapnik REQUIRED)
 FIND_PACKAGE(icuuc REQUIRED)
