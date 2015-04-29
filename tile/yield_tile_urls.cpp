@@ -108,6 +108,8 @@ Options:
     -b,--bbox x1,y1,x2,y2: (x1, y1) and (x2, y2) are two pairs of lon/lat
         + the pairs define the bounding box of URLs
         + defaults to (-180, 90)-(180, -90), i.e. the entire planet
+    -s,--suffix (png|jpg|...)
+        + suffix of the URLs
     -v,--version
     -h,--help
 */
@@ -115,6 +117,7 @@ int main(int ac, char** av) {
     try { 
         std::string config;
         std::string base;
+        std::string suffix;
         argv::zoom::pair_t zoom_levels;
         argv::bbox::box_t  bbox;
         /** Define and parse the program options 
@@ -129,6 +132,7 @@ int main(int ac, char** av) {
             ("help,h", "Prints help messages")
             ("version,v", "Prints version info.")
             ("prefix,p", po::value<std::string>(&base)->value_name("base-url")->required(), "Specifies the HTTP(S) URL to which paths for tiles are appended") 
+            ("suffix,s", po::value<std::string>(&suffix)->value_name("suffix")->default_value("png"), "Specifies the suffix of the URLs") 
             ("zoom,z", 
                 po::value<argv::zoom::pair_t>(&zoom_levels)->value_name("z1-z2")->default_value(argv::zoom::pair_t{0, 16}, "0-16"), 
                 "Specifies zoom levels to generate URLs, between 0-20\n"
@@ -221,18 +225,17 @@ int main(int ac, char** av) {
         y2 = std::max(-LAT_LIMIT, std::min(y2, LAT_LIMIT));
 
         // Emit!
-        char* tile_path = (char*)alloca(base.length() + 28);
-        memcpy(tile_path, base.c_str(), base.length());
-        char* tp_head = tile_path + base.length();
-
+        char* prefix = const_cast<char*>(base.c_str());
+        if (prefix[base.length()-1] == '/') {
+            prefix[base.length()-1] = '\0';
+        }
         uint32_t tx_left, ty_top, tx_right, ty_bottom;
         for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
             lonlat_to_tile(x1, y1, z, tx_left, ty_top);
             lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
             for (uint32_t y = ty_top; y <= ty_bottom; ++y) {
                 for (uint32_t x = tx_left; x <= tx_right; ++x) {
-                    to_physical_path(tp_head, z, x, y, PNG);
-                    std::cout << tile_path << std::endl;
+                    printf("%s/%d/%d/%d.%s\n", prefix, z, x, y, suffix.c_str());
                 }
             }
         }
