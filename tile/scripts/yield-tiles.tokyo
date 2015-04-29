@@ -1,0 +1,1 @@
+yield-tiles -s -z 0-16 -b 138.779000334176,34.8709816591244,140.868432008203,36.5579448557204 -c /opt/osm/openstreetmap-carto/osm.xml -p /opt/osm/tiles
