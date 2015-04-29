@@ -22,7 +22,7 @@ let proj(x, y, z) =
     let my = -(TILE_SIZE * y * res(z) - ORIGIN_SHIFT)
     (mx, my)
 
-assert(proj(3638, 1612, 12) == (15556463.996599074, 4265797.674539117))
+e.g. proj(3638, 1612, 12) == (15556463.996599074, 4265797.674539117)
 
 let proj_lonlat(mx, my) = 
     let lon = (mx / ORIGIN_SHIFT) * 180.0
@@ -31,7 +31,7 @@ let proj_lonlat(mx, my) =
     lat <- 180 / math.pi * (2 * math.atan( math.exp( lat * math.pi / 180.0)) - math.pi / 2.0)
     (lat, lon)
 
-assert(proj_lonlat(proj(3638, 1612, 12)) = (139.74609375000003, 35.74651225991853))
+e.g. proj_lonlat(proj(3638, 1612, 12)) = (139.74609375000003, 35.74651225991853)
 */
 static inline void tile_to_merc(uint32_t zoom, uint32_t x, uint32_t y, double& mx, double& my) {
     constexpr double INITIAL_RESOLUTION = 2*M_PI * 6378137 / TILE_SIZE;

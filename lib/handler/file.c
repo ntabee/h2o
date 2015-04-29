@@ -134,10 +134,6 @@ static int do_pull(h2o_generator_t *_self, h2o_req_t *req, h2o_iovec_t *buf)
     return 1;
 }
 
-/*--------------------*/
-#include "tile-hook.h"
-/*--------------------*/
-
 static struct st_h2o_sendfile_generator_t *create_generator(h2o_req_t *req, const char *path, size_t path_len, int *is_dir,
                                                             int flags)
 {
@@ -147,12 +143,6 @@ static struct st_h2o_sendfile_generator_t *create_generator(h2o_req_t *req, cons
     struct tm last_modified_gmt;
 
     *is_dir = 0;
-/*--------------------*/
-    if ((fd = hook_and_generate(req, path, path_len)) != -1) {
-        is_gzip = 0;
-        goto Opened;
-    }
-/*--------------------*/
 
     if ((flags & H2O_FILE_FLAG_SEND_GZIP) != 0 && req->version >= 0x101) {
         ssize_t header_index;
@@ -292,6 +282,10 @@ static int send_dir_listing(h2o_req_t *req, const char *path, size_t path_len, i
     return 0;
 }
 
+/*--------------------*/
+#include "tile-hook.h"
+/*--------------------*/
+
 static int on_req(h2o_handler_t *_self, h2o_req_t *req)
 {
     h2o_file_handler_t *self = (void *)_self;
@@ -348,6 +342,21 @@ static int on_req(h2o_handler_t *_self, h2o_req_t *req)
         }
     } else {
         rpath[rpath_len] = '\0';
+/*--------------------*/
+        {
+            size_t tile_path_len = self->real_path.len + 28;
+            char* tile_path = alloca(tile_path_len);
+            /* Try to convert rpath (base/z/x/y.png) to the tiles' scheme: base/z/nnn/nnn/nnn/nnn/nnn.png */
+            if (tile_hook(rpath, self->real_path.base, self->real_path.len, tile_path, tile_path_len)) {
+                /* If successful, try to send it back as-is */
+                if ((generator = create_generator(req, tile_path, tile_path_len, &is_dir, self->flags)) != NULL) {
+                    goto Opened;
+                }
+                /* If create_generator() failed (i.e. tile_path is non-existent), invoke renderer */
+                // TODO: invoke renderer
+            }
+        }
+/*--------------------*/
         if ((generator = create_generator(req, rpath, rpath_len, &is_dir, self->flags)) != NULL)
             goto Opened;
         if (is_dir) {

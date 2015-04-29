@@ -36,7 +36,7 @@ N.B.
   N.B.
     + The path is SLASH-DELIMITED, meaning may NOT work on Windows as expected.
 */
-inline void to_physical_path(char *buf, uint32_t zoom, uint32_t x, uint32_t y, enum TILE_SUFFIX suffix) {
+static inline void to_physical_path(char *buf, uint32_t zoom, uint32_t x, uint32_t y, enum TILE_SUFFIX suffix) {
 /*
 No such a param as "buflen"; malicious/vulnerable codes will anyway pass a wrong value.
 The only rule to follow instead is the magic 27-byte convention.
