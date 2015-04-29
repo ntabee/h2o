@@ -339,8 +339,6 @@ INCLUDE_DIRECTORIES(
 SET(YIELD_TILES_SOURCE_FILES
     include/git-revision.h
     tile/proj.hpp
-    tile/blank-ocean.h
-    tile/blank-land.h
     tile/yield_tiles.cpp
 )
 ADD_EXECUTABLE(yield-tiles
@@ -352,3 +350,26 @@ TARGET_LINK_LIBRARIES(yield-tiles ${Boost_LIBRARIES} ${MAPNIK_LIBRARIES} ${ICUUC
 INSTALL(TARGETS yield-tiles
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib)
+
+#   yield-tile-urls
+PROJECT(yield-tile-urls CXX)
+FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system program_options regex)
+
+INCLUDE_DIRECTORIES(
+    tile)
+SET(YIELD_TILE_URLS_SOURCE_FILES
+    include/git-revision.h
+    tile/proj.hpp
+    tile/yield_tile_urls.cpp
+)
+ADD_EXECUTABLE(yield-tile-urls
+    ${YIELD_TILE_URLS_SOURCE_FILES})
+SET_TARGET_PROPERTIES(yield-tile-urls PROPERTIES COMPILE_FLAGS "-std=c++11")
+INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(yield-tile-urls ${Boost_LIBRARIES})
+
+INSTALL(TARGETS yield-tile-urls
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib)
+
+
