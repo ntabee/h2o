@@ -129,6 +129,7 @@
 		10F417FF19C2D2F800B6E31A /* picotest.c in Sources */ = {isa = PBXBuildFile; fileRef = 10F417FD19C2D2F800B6E31A /* picotest.c */; };
 		10F4180119C2D31600B6E31A /* yoml.h in Headers */ = {isa = PBXBuildFile; fileRef = 10F4180019C2D31600B6E31A /* yoml.h */; };
 		10F4180519CA75C500B6E31A /* configurator.c in Sources */ = {isa = PBXBuildFile; fileRef = 10F4180419CA75C500B6E31A /* configurator.c */; };
+		10F9F2651AF4795D0056F26B /* redirect.c in Sources */ = {isa = PBXBuildFile; fileRef = 10F9F2641AF4795D0056F26B /* redirect.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -280,7 +281,18 @@
 		10583BF91AE783BE004A3AD6 /* searchstyle.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; name = searchstyle.css; path = assets/searchstyle.css; sourceTree = "<group>"; };
 		10583BFA1AE783BE004A3AD6 /* style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; name = style.css; path = assets/style.css; sourceTree = "<group>"; };
 		10583BFB1AE78DCC004A3AD6 /* syntax_and_structure.mt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = syntax_and_structure.mt; sourceTree = "<group>"; };
+		10583BFC1AE88782004A3AD6 /* base_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = base_directives.mt; sourceTree = "<group>"; };
+		10583BFD1AE8A7E1004A3AD6 /* directive.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = directive.mt; sourceTree = "<group>"; };
 		10583BFF1AEF368A004A3AD6 /* 293.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = 293.c; sourceTree = "<group>"; };
+		10583C011AEF86E6004A3AD6 /* http1_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = http1_directives.mt; sourceTree = "<group>"; };
+		10583C021AEF8C7D004A3AD6 /* http2_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = http2_directives.mt; sourceTree = "<group>"; };
+		10583C031AF1D7D5004A3AD6 /* access_log_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = access_log_directives.mt; sourceTree = "<group>"; };
+		10583C041AF1F315004A3AD6 /* expires_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = expires_directives.mt; sourceTree = "<group>"; };
+		10583C051AF1F893004A3AD6 /* file_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = file_directives.mt; sourceTree = "<group>"; };
+		10583C061AF20BE5004A3AD6 /* headers_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = headers_directives.mt; sourceTree = "<group>"; };
+		10583C071AF21539004A3AD6 /* proxy_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = proxy_directives.mt; sourceTree = "<group>"; };
+		10583C081AF2188E004A3AD6 /* redirect_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = redirect_directives.mt; sourceTree = "<group>"; };
+		10583C091AF2D302004A3AD6 /* reproxy_directives.mt */ = {isa = PBXFileReference; lastKnownFileType = text; path = reproxy_directives.mt; sourceTree = "<group>"; };
 		1058C87C1AA41789008D6180 /* headers.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = headers.c; sourceTree = "<group>"; };
 		1058C87F1AA42568008D6180 /* 50headers.t */ = {isa = PBXFileReference; lastKnownFileType = text; path = 50headers.t; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.perl; };
 		1058C8871AA6DE4B008D6180 /* hostinfo.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = hostinfo.h; sourceTree = "<group>"; };
@@ -401,6 +413,7 @@
 		10F4180019C2D31600B6E31A /* yoml.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = yoml.h; path = yoml/yoml.h; sourceTree = "<group>"; };
 		10F4180219C2D32100B6E31A /* yoml-parser.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "yoml-parser.h"; path = "yoml/yoml-parser.h"; sourceTree = "<group>"; };
 		10F4180419CA75C500B6E31A /* configurator.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = configurator.c; sourceTree = "<group>"; };
+		10F9F2641AF4795D0056F26B /* redirect.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = redirect.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -559,6 +572,7 @@
 				105534BD1A3B8F7700627ECB /* file.c */,
 				105534C21A3B917000627ECB /* mimemap.c */,
 				1058C87C1AA41789008D6180 /* headers.c */,
+				10F9F2641AF4795D0056F26B /* redirect.c */,
 			);
 			path = handler;
 			sourceTree = "<group>";
@@ -634,6 +648,7 @@
 			isa = PBXGroup;
 			children = (
 				10583BE01AE5A222004A3AD6 /* wrapper.mt */,
+				10583BFD1AE8A7E1004A3AD6 /* directive.mt */,
 			);
 			path = snippets;
 			sourceTree = "<group>";
@@ -654,6 +669,16 @@
 				10583BFB1AE78DCC004A3AD6 /* syntax_and_structure.mt */,
 				10583BF51AE765E0004A3AD6 /* command_options.mt */,
 				10583BF61AE765E0004A3AD6 /* quick_start.mt */,
+				10583BFC1AE88782004A3AD6 /* base_directives.mt */,
+				10583C011AEF86E6004A3AD6 /* http1_directives.mt */,
+				10583C021AEF8C7D004A3AD6 /* http2_directives.mt */,
+				10583C031AF1D7D5004A3AD6 /* access_log_directives.mt */,
+				10583C041AF1F315004A3AD6 /* expires_directives.mt */,
+				10583C051AF1F893004A3AD6 /* file_directives.mt */,
+				10583C061AF20BE5004A3AD6 /* headers_directives.mt */,
+				10583C071AF21539004A3AD6 /* proxy_directives.mt */,
+				10583C081AF2188E004A3AD6 /* redirect_directives.mt */,
+				10583C091AF2D302004A3AD6 /* reproxy_directives.mt */,
 			);
 			path = configure;
 			sourceTree = "<group>";
@@ -1296,6 +1321,7 @@
 				10583C001AEF368A004A3AD6 /* 293.c in Sources */,
 				105534BE1A3B8F7700627ECB /* file.c in Sources */,
 				1079244719A3265C00C52AD6 /* http1.c in Sources */,
+				10F9F2651AF4795D0056F26B /* redirect.c in Sources */,
 				1079244819A3265C00C52AD6 /* connection.c in Sources */,
 				1079244119A3264300C52AD6 /* picohttpparser.c in Sources */,
 				1058C87D1AA41789008D6180 /* headers.c in Sources */,

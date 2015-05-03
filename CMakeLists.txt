@@ -174,6 +174,7 @@ SET(UNIT_TEST_SOURCE_FILES
     t/00unit/lib/handler/file.c
     t/00unit/lib/handler/headers.c
     t/00unit/lib/handler/mimemap.c
+    t/00unit/lib/handler/redirect.c
     t/00unit/lib/http2/hpack.c
     t/00unit/lib/http2/scheduler.c
     t/00unit/issues/293.c)
@@ -188,6 +189,7 @@ LIST(REMOVE_ITEM UNIT_TEST_SOURCE_FILES
     lib/handler/file.c
     lib/handler/headers.c
     lib/handler/mimemap.c
+    lib/handler/redirect.c
     lib/http2/hpack.c
     lib/http2/scheduler.c)
 
@@ -271,6 +273,7 @@ ELSE (LIBUV_FOUND)
 ENDIF (LIBUV_FOUND)
 
 INSTALL(PROGRAMS share/h2o/fetch-ocsp-response share/h2o/start_server DESTINATION share/h2o)
+INSTALL(DIRECTORY doc/ DESTINATION share/doc/h2o PATTERN "Makefile" EXCLUDE PATTERN "README.md" EXCLUDE)
 
 # tests
 ADD_EXECUTABLE(t-00unit-evloop.t ${UNIT_TEST_SOURCE_FILES})
