@@ -115,20 +115,20 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
     }
 
 
-    image_32 image(m.width(),m.height());
-    agg_renderer<image_32> ren(m,image);
     /* (left, top)-(right, bottom) in Mercator projection. */ 
     double l, t, r, b; 
+    image_32 image(m.width(),m.height()); 
+    image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); 
 
 #define INC_COUNT() { \
     uint64_t v = ++rendered; \
     if (v % 1000 == 0) { \
         uint64_t s = skipped; \
         /* cout << XX << ... is not atomic */ \
-        printf("%ld/%ld done. (%ld skipped)\n", v, total_tiles, s); \
+        printf("%ld/%ld (%.3lf%) done. (%ld skipped)\n", v, total_tiles, (100.0*(double)v / total_tiles), s); \
     } \
 }
-#define SAVE(vw, to) { save_to_file(image_view_any(vw), to, "png256"); }
+#define SAVE(vw, to) { save_to_file(image_view_any(vw), to, "png256:e=miniz"); }
 #define EXISTS(p) boost::filesystem::exists(p)
 #define DO_RENDER(tile_id) { \
     unpack(tile_id, z, x, y); \
@@ -143,9 +143,9 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
         bbox.height(bbox.height() * 2); \
         /* Render */ \
         m.zoom_to_box(bbox); \
+        agg_renderer<image_32> ren(m,image); \
         ren.apply(); \
         /* Clip the center 256x256 into vw */ \
-        image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); \
         SAVE(vw, tile_path); \
     } else { \
         ++skipped; \
