@@ -136,6 +136,8 @@ SET(LIB_SOURCE_FILES
     lib/handler/file.c
 ##############    
 	lib/handler/tile-hook.c
+    lib/handler/configurator/tile.c
+    tile/render-tile.cpp
 ##############    
     lib/handler/headers.c
     lib/handler/mimemap.c

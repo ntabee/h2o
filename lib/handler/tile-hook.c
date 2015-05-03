@@ -34,85 +34,7 @@
 #include "h2o.h"
 #include "path-mapper.h"
 
-#if 0
-static void do_close(h2o_generator_t *_self, h2o_req_t *req)
-{
-    struct st_h2o_sendfile_generator_t *self = (void *)_self;
-    close(self->fd);
-}
-
-static void do_proceed(h2o_generator_t *_self, h2o_req_t *req)
-{
-    struct st_h2o_sendfile_generator_t *self = (void *)_self;
-    size_t rlen;
-    ssize_t rret;
-    h2o_iovec_t vec;
-    int is_final;
-
-    /* read the file */
-    rlen = self->bytesleft;
-    if (rlen > MAX_BUF_SIZE)
-        rlen = MAX_BUF_SIZE;
-    while ((rret = read(self->fd, self->buf, rlen)) == -1 && errno == EINTR)
-        ;
-    if (rret == -1) {
-        req->http1_is_persistent = 0; /* FIXME need a better interface to dispose an errored response w. content-length */
-        h2o_send(req, NULL, 0, 1);
-        do_close(&self->super, req);
-        return;
-    }
-    self->bytesleft -= rret;
-    is_final = self->bytesleft == 0;
-
-    /* send (and close if done) */
-    vec.base = self->buf;
-    vec.len = rret;
-    h2o_send(req, &vec, 1, is_final);
-    if (is_final)
-        do_close(&self->super, req);
-}
-
-static inline struct st_h2o_sendfile_generator_t* createa_generator(h2o_req_t *req, const char* path, int flags) {
-    struct st_h2o_sendfile_generator_t *self;
-    int fd;
-    struct stat st;
-    struct tm last_modified_gmt;
-
-    if ((fd = open(path, O_RDONLY | O_CLOEXEC)) == -1)
-        return NULL;
-    if (fstat(fd, &st) != 0) {
-        perror("fstat");
-        close(fd);
-        return NULL;
-    }
-    if (S_ISDIR(st.st_mode)) {
-        close(fd);
-        return NULL;
-    }
-
-    self = h2o_mem_alloc_pool(&req->pool, sizeof(*self));
-    self->super.proceed = do_proceed;
-    self->super.stop = do_close;
-    self->fd = fd;
-    self->req = NULL;
-    self->bytesleft = st.st_size;
-
-    gmtime_r(&st.st_mtime, &last_modified_gmt);
-    self->last_modified.packed = time2packed(&last_modified_gmt);
-    h2o_time2str_rfc1123(self->last_modified.buf, &last_modified_gmt);
-    if ((flags & H2O_FILE_FLAG_NO_ETAG) != 0) {
-        self->etag_len = 0;
-    } else {
-        self->etag_len = sprintf(self->etag_buf, "\"%08x-%zx\"", (unsigned)st.st_mtime, (size_t)st.st_size);
-    }
-    self->is_gzip = 0;
-    self->send_vary = 0;
-
-    return self;
-}
-#endif
-
-int tile_hook(const char* rpath, const char* base, size_t base_len, char *path_buf, size_t path_buf_len) {
+int tile_hook(const char* rpath, const char* base, size_t base_len, char *path_buf, size_t path_buf_len, uint32_t* pzoom, uint32_t* px, uint32_t* py) {
     /*
     rpath: abs. path to the tile, as resolved by h2o.
     */
@@ -209,6 +131,9 @@ Done: // <- the "final state"
     assert(path_buf_len >= base_len + 27);
     memcpy(path_buf, base, base_len);
     to_physical_path(path_buf + base_len, zoom, x, y, suffix);
+    *pzoom = zoom;
+    *px    = x;
+    *py    = y;
     /* fprintf(stderr, "***%d %d %d %d ==> %s ***\n", zoom, x, y, suffix, path_buf); */
 
     return 1;

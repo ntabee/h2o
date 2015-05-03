@@ -960,6 +960,12 @@ int h2o_file_send(h2o_req_t *req, int status, const char *reason, const char *pa
  */
 h2o_file_handler_t *h2o_file_register(h2o_pathconf_t *pathconf, const char *real_path, const char **index_files,
                                       h2o_mimemap_t *mimemap, int flags);
+
+/*--------------------*/
+typedef struct st_h2o_tile_handler_t h2o_tile_handler_t;
+h2o_tile_handler_t *h2o_tile_register(h2o_pathconf_t *pathconf, const char* base_path, const char* style_file_path);
+/*--------------------*/
+
 /**
  * returns the associated mimemap
  */
@@ -968,6 +974,9 @@ h2o_mimemap_t *h2o_file_get_mimemap(h2o_file_handler_t *handler);
  * registers the configurator
  */
 void h2o_file_register_configurator(h2o_globalconf_t *conf);
+/*--------------------*/
+void h2o_tile_register_configurator(h2o_globalconf_t *conf);
+/*--------------------*/
 
 /* lib/headers.c */
 
