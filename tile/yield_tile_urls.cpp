@@ -101,7 +101,7 @@ namespace argv {
 yield-tile-urls -p base-url [-z z1-z2] [-b x1,y1,x2,y2]
 generates URLs for tiles bounded by the box (x1, y1)-(x2, y2) for zoom levels in [z1, z2], prefixed by base-url.
 Options:
-    -p,--prefix base-url: an HTTP(S) URL, to which paths for tiles are appended
+    -p,--prefix base-url: a URL (or, can be a local path), to which paths for tiles are appended
     -z,--zoom z1-z2: zoom levels in [0, ..., 20] to generate URLs
         + values less/greater than 0/20 are fit to 0/20 resp. 
         + defaults to 0-16
@@ -120,6 +120,8 @@ int main(int ac, char** av) {
         std::string suffix;
         argv::zoom::pair_t zoom_levels;
         argv::bbox::box_t  bbox;
+        bool emit_physical = false; // If true, print in the physical form: /base/z/nnn/nnn/nnn/nnn/nnn.png
+
         /** Define and parse the program options 
         */ 
         namespace po = boost::program_options; 
@@ -131,7 +133,8 @@ int main(int ac, char** av) {
         desc.add_options() 
             ("help,h", "Prints help messages")
             ("version,v", "Prints version info.")
-            ("prefix,p", po::value<std::string>(&base)->value_name("base-url")->required(), "Specifies the HTTP(S) URL to which paths for tiles are appended") 
+            ("prefix,p", po::value<std::string>(&base)->value_name("base-url")->required(), "Specifies the URL (or, can be a local path) to which tile-paths are appended") 
+            ("physical,P", "Emits tile-paths in the physical form: base/z/nnn/nnn/nnn/nnn/nnn.png") 
             ("suffix,s", po::value<std::string>(&suffix)->value_name("suffix")->default_value("png"), "Specifies the suffix of the URLs") 
             ("zoom,z", 
                 po::value<argv::zoom::pair_t>(&zoom_levels)->value_name("z1-z2")->default_value(argv::zoom::pair_t{0, 16}, "0-16"), 
@@ -167,6 +170,9 @@ int main(int ac, char** av) {
                 return 0;
             }
 
+            if ( vm.count("physical") ) {
+                emit_physical = true;
+            }
             po::notify(vm); // throws on error, so do after help in case 
                             // there are any problems 
         } catch(po::required_option& e) { 
@@ -224,18 +230,41 @@ int main(int ac, char** av) {
         y1 = std::max(-LAT_LIMIT, std::min(y1, LAT_LIMIT));
         y2 = std::max(-LAT_LIMIT, std::min(y2, LAT_LIMIT));
 
-        // Emit!
+        // Trim the trailing '/' if any.
+        
         char* prefix = const_cast<char*>(base.c_str());
         if (prefix[base.length()-1] == '/') {
             prefix[base.length()-1] = '\0';
         }
+        // Emit!
         uint32_t tx_left, ty_top, tx_right, ty_bottom;
-        for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
-            lonlat_to_tile(x1, y1, z, tx_left, ty_top);
-            lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
-            for (uint32_t y = ty_top; y <= ty_bottom; ++y) {
-                for (uint32_t x = tx_left; x <= tx_right; ++x) {
-                    printf("%s/%d/%d/%d.%s\n", prefix, z, x, y, suffix.c_str());
+        if (emit_physical) {
+            char* tile_path = (char*)alloca(base.length() + 28);
+            strcpy(tile_path, prefix);
+            char* tp_head = tile_path + strlen(prefix);
+            *tp_head = '/'; 
+            tp_head++;
+            boost::algorithm::to_lower(suffix);
+            TILE_SUFFIX ts = (suffix == "png") ? PNG : JPG;
+
+            for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
+                lonlat_to_tile(x1, y1, z, tx_left, ty_top);
+                lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
+                for (uint32_t y = ty_top; y <= ty_bottom; ++y) {
+                    for (uint32_t x = tx_left; x <= tx_right; ++x) {
+                        to_physical_path(tp_head, z, x, y, ts);
+                        puts(tile_path);
+                    }
+                }
+            }
+        } else {
+            for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
+                lonlat_to_tile(x1, y1, z, tx_left, ty_top);
+                lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
+                for (uint32_t y = ty_top; y <= ty_bottom; ++y) {
+                    for (uint32_t x = tx_left; x <= tx_right; ++x) {
+                        printf("%s/%d/%d/%d.%s\n", prefix, z, x, y, suffix.c_str());
+                    }
                 }
             }
         }
