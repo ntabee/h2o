@@ -1,4 +1,3 @@
-#FIND_PATH(LIBUV_INCLUDE_DIR NAMES uv.h)
 FIND_LIBRARY(MAPNIK_LIBRARIES NAMES mapnik libmapnik)
 
 INCLUDE(FindPackageHandleStandardArgs)
