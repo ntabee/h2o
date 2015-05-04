@@ -94,6 +94,7 @@ boost::atomic<uint64_t> rendered(0);    // # of tiles already done (including th
 boost::atomic<uint64_t> skipped(0);     // # of tiles skipped.
 uint64_t total_tiles;   // # of tiles to render, set in main() and invariant during the execution
 bool skip_existing;     // If true, avoid overwriting existing tiles; set in main() and invariant.
+boost::timer::cpu_timer* timer;
 
 void renderer(const boost::filesystem::path& xml, const boost::filesystem::path& base_path) {
     using namespace mapnik;
@@ -125,7 +126,8 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
     if (v % 1000 == 0) { \
         uint64_t s = skipped; \
         /* cout << XX << ... is not atomic */ \
-        printf("%ld/%ld (%.3lf%) done. (%ld skipped)\n", v, total_tiles, (100.0*(double)v / total_tiles), s); \
+        double sec = (double)timer->elapsed().wall/(1000UL*1000UL*1000UL); \
+        printf("%ld/%ld (%.3lf%) done. (%ld skipped) %s %.3lf tiles/s.\n", v, total_tiles, (100.0*(double)v / total_tiles), s, timer->format(6, "%ws").c_str(), (double)v/sec); \
     } \
 }
 #define SAVE(vw, to) { save_to_file(image_view_any(vw), to, "png256:e=miniz"); }
@@ -448,7 +450,8 @@ int main(int ac, char** av) {
         y1 = std::max(-LAT_LIMIT, std::min(y1, LAT_LIMIT));
         y2 = std::max(-LAT_LIMIT, std::min(y2, LAT_LIMIT));
 
-        boost::timer::auto_cpu_timer timer;
+//        boost::timer::auto_cpu_timer timer;
+        timer = new boost::timer::cpu_timer;
         // Count # of tiles to render
         std::cout 
             << "  # of tiles  : " << std::endl
@@ -498,6 +501,7 @@ int main(int ac, char** av) {
         consumer_threads.join_all();        
 
         std::cout 
+            << timer->format()
             << "Completed!" << std::endl
         ;
     } catch(std::exception& e) { 
