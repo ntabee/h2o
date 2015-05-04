@@ -1300,7 +1300,9 @@ static void setup_configurators(void)
     h2o_access_log_register_configurator(&conf.globalconf);
     h2o_expires_register_configurator(&conf.globalconf);
 /*--------------------*/
+#ifdef H2O_TILE
     h2o_tile_register_configurator(&conf.globalconf);
+#endif
 /*--------------------*/
     h2o_file_register_configurator(&conf.globalconf);
     h2o_headers_register_configurator(&conf.globalconf);

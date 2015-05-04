@@ -90,9 +90,6 @@ INCLUDE_DIRECTORIES(
     deps/picotest
     deps/yaml/include
     deps/yoml
-##############    
-    tile
-##############    
     )
 
 SET(LIBYAML_SOURCE_FILES
@@ -134,11 +131,6 @@ SET(LIB_SOURCE_FILES
     lib/handler/chunked.c
     lib/handler/expires.c
     lib/handler/file.c
-##############    
-	lib/handler/tile-hook.c
-    lib/handler/configurator/tile.c
-    tile/render-tile.cpp
-##############    
     lib/handler/headers.c
     lib/handler/mimemap.c
     lib/handler/proxy.c
@@ -323,6 +315,41 @@ ENDIF (APPLE)
 
 
 ##############    
+# h2o-tile server
+INCLUDE_DIRECTORIES(tile)
+
+SET(TILE_SOURCE_FILES
+    ${LIB_SOURCE_FILES}
+##############    
+    lib/handler/tile-hook.c
+    lib/handler/configurator/tile.c
+    tile/mapnik-bridge.cpp
+##############    
+)
+
+ADD_EXECUTABLE(h2o-tile
+    ${TILE_SOURCE_FILES}
+    ${LIBYAML_SOURCE_FILES}
+    src/main.c)
+SET_TARGET_PROPERTIES(h2o-tile PROPERTIES COMPILE_FLAGS "-DH2O_TILE -DH2O_USE_LIBUV=0")
+IF (WITH_BUNDLED_SSL)
+    PREPEND_INCLUDE_DIRECTORY(h2o-tile ${BUNDLED_SSL_INCLUDE_DIR})
+    TARGET_LINK_LIBRARIES(h2o-tile ${BUNDLED_SSL_LIBRARIES})
+    ADD_DEPENDENCIES(h2o-tile bundled-ssl)
+ELSE (WITH_BUNDLED_SSL)
+    IF (OPENSSL_FOUND)
+        PREPEND_INCLUDE_DIRECTORY(h2o-tile ${OPENSSL_INCLUDE_DIR})
+        TARGET_LINK_LIBRARIES(h2o-tile ${OPENSSL_LIBRARIES})
+    ENDIF (OPENSSL_FOUND)
+ENDIF (WITH_BUNDLED_SSL)
+TARGET_LINK_LIBRARIES(h2o-tile ${EXTRA_LIBRARIES})
+FIND_PACKAGE(mapnik REQUIRED)
+TARGET_LINK_LIBRARIES(h2o-tile ${MAPNIK_LIBRARIES})
+INSTALL(TARGETS h2o-tile
+    RUNTIME DESTINATION bin
+)
+
+##############    
 # tile-server helpers
 
 LINK_DIRECTORIES(
@@ -340,7 +367,8 @@ FIND_PACKAGE(mapnik REQUIRED)
 FIND_PACKAGE(icuuc REQUIRED)
 
 INCLUDE_DIRECTORIES(
-    tile)
+    tile
+)
 SET(YIELD_TILES_SOURCE_FILES
     include/git-revision.h
     tile/proj.hpp
@@ -361,7 +389,8 @@ PROJECT(yield-tile-urls CXX)
 FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system program_options regex)
 
 INCLUDE_DIRECTORIES(
-    tile)
+    tile
+)
 SET(YIELD_TILE_URLS_SOURCE_FILES
     include/git-revision.h
     tile/proj.hpp
