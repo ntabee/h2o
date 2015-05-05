@@ -15,7 +15,7 @@ Status
 At the very moment, this is only at the stage of:
 - just managed to work on my personal Linux box
 - with a tiny dataset (covering Tokyo), and
-- by a quick & cheap load test with [wrk](https://github.com/wg/wrk)
+- tests by a quick & cheap [wrk](https://github.com/wg/wrk) script
 
 Further, *no documentations*, nor *demo* environment is done yet;
 these will be supplied soon, hopefully!
