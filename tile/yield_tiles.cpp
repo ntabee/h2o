@@ -126,8 +126,6 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
 
     /* (left, top)-(right, bottom) in Mercator projection. */ 
     double l, t, r, b; 
-    image_32 image(m.width(),m.height()); 
-    image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); 
 
 #define INC_COUNT() { \
     uint64_t v = ++rendered; \
@@ -146,6 +144,10 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
     boost::filesystem::path boost_tile_path = boost::filesystem::path(tile_path); \
     if ( likely(!(skip_existing && EXISTS(boost_tile_path))) )  { \
         mkdir_p(boost_tile_path.parent_path()); \
+                                                \
+        image_32 image(m.width(),m.height());   \
+        image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); \
+                                                \
         tile_to_merc_box(z, x, y, l, t, r, b); \
         box2d<double> bbox(l, t, r, b); \
         /* Double the bbox */ \
@@ -458,7 +460,6 @@ int main(int ac, char** av) {
         y1 = std::max(-LAT_LIMIT, std::min(y1, LAT_LIMIT));
         y2 = std::max(-LAT_LIMIT, std::min(y2, LAT_LIMIT));
 
-//        boost::timer::auto_cpu_timer timer;
         timer = new boost::timer::cpu_timer;
         // Count # of tiles to render
         std::cout 

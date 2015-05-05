@@ -323,7 +323,7 @@ SET(TILE_SOURCE_FILES
 ##############    
     lib/handler/tile-hook.c
     lib/handler/configurator/tile.c
-    tile/mapnik-bridge.cpp
+    lib/handler/mapnik-bridge.cpp
 ##############    
 )
 
@@ -344,7 +344,8 @@ ELSE (WITH_BUNDLED_SSL)
 ENDIF (WITH_BUNDLED_SSL)
 TARGET_LINK_LIBRARIES(h2o-tile ${EXTRA_LIBRARIES})
 FIND_PACKAGE(mapnik REQUIRED)
-TARGET_LINK_LIBRARIES(h2o-tile ${MAPNIK_LIBRARIES})
+FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem)
+TARGET_LINK_LIBRARIES(h2o-tile ${MAPNIK_LIBRARIES} ${Boost_LIBRARIES})
 INSTALL(TARGETS h2o-tile
     RUNTIME DESTINATION bin
 )

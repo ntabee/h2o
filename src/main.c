@@ -53,6 +53,12 @@
 #include "h2o/http2.h"
 #include "h2o/serverutil.h"
 
+/*--------------------*/
+#ifdef H2O_TILE
+#include "mapnik-bridge.h"
+#endif
+/*--------------------*/
+
 /* simply use a large value, and let the kernel clip it to the internal max */
 #define H2O_SOMAXCONN (65535)
 
@@ -1005,6 +1011,26 @@ static int on_config_num_name_resolution_threads(h2o_configurator_command_t *cmd
     return 0;
 }
 
+
+/*--------------------*/
+#ifdef H2O_TILE
+int mapnik_datasource_initialized = 0;
+static int on_config_mapnik_datasource(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
+{
+    init_mapnik_datasource(node->data.scalar);
+    mapnik_datasource_initialized = 1;
+    return 0;
+}
+
+static int on_config_mapnik_fonts(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
+{
+    load_fonts(node->data.scalar);
+    return 0;
+}
+
+#endif
+/*--------------------*/
+
 yoml_t *load_config(const char *fn)
 {
     FILE *fp;
@@ -1295,6 +1321,14 @@ static void setup_configurators(void)
         h2o_configurator_define_command(c, "num-threads", H2O_CONFIGURATOR_FLAG_GLOBAL, on_config_num_threads);
         h2o_configurator_define_command(c, "num-name-resolution-threads", H2O_CONFIGURATOR_FLAG_GLOBAL,
                                         on_config_num_name_resolution_threads);
+/*--------------------*/
+#ifdef H2O_TILE
+        h2o_configurator_define_command(c, "mapnik-datasource", H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR ,
+                                        on_config_mapnik_datasource);
+        h2o_configurator_define_command(c, "mapnik-fonts", H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR ,
+                                        on_config_mapnik_fonts);
+#endif
+/*--------------------*/
     }
 
     h2o_access_log_register_configurator(&conf.globalconf);
@@ -1420,6 +1454,15 @@ int main(int argc, char **argv)
         if (h2o_configurator_apply(&conf.globalconf, yoml) != 0)
             exit(EX_CONFIG);
         yoml_free(yoml);
+
+/*--------------------*/
+#ifdef H2O_TILE
+        if (!mapnik_datasource_initialized) {
+            /* No "mapnik-datasource" entry in the .conf */
+            init_mapnik_datasource(NULL); /* passing NULL is equavalent to the hard-coded default: /usr/local/mapnik/input */
+        }
+#endif
+/*--------------------*/
     }
 
     /* check if all the fds passed in by server::starter were bound */
