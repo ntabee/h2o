@@ -52,10 +52,18 @@
 #include "git-revision.h"
 #define VERSION "0.0.0"
 
+#if __GNUC__ >= 3
+# define likely(x) __builtin_expect(!!(x), 1)
+# define unlikely(x) __builtin_expect(!!(x), 0)
+#else
+# define likely(x) (x)
+# define unlikely(x) (x)
+#endif
+
 void mkdir_p(const boost::filesystem::path& base_path) {
-    if (boost::filesystem::exists(base_path)) {
+    if (likely(boost::filesystem::exists(base_path))) {
         boost::filesystem::path canonical = boost::filesystem::canonical(base_path);
-        if (!boost::filesystem::is_directory(canonical)) {
+        if (unlikely(!boost::filesystem::is_directory(canonical))) {
             std::string message = str(boost::format("Error: %1% exists, but not a directory.") % base_path);
             throw std::runtime_error( message );
 
@@ -123,7 +131,7 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
 
 #define INC_COUNT() { \
     uint64_t v = ++rendered; \
-    if (v % 1000 == 0) { \
+    if (unlikely(v % 1000 == 0)) { \
         uint64_t s = skipped; \
         /* cout << XX << ... is not atomic */ \
         double sec = (double)timer->elapsed().wall/(1000UL*1000UL*1000UL); \
@@ -136,7 +144,7 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
     unpack(tile_id, z, x, y); \
     to_physical_path(tp_head, z, x, y, PNG); \
     boost::filesystem::path boost_tile_path = boost::filesystem::path(tile_path); \
-    if ( !(skip_existing && EXISTS(boost_tile_path)) )  { \
+    if ( likely(!(skip_existing && EXISTS(boost_tile_path))) )  { \
         mkdir_p(boost_tile_path.parent_path()); \
         tile_to_merc_box(z, x, y, l, t, r, b); \
         box2d<double> bbox(l, t, r, b); \
