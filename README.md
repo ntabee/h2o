@@ -20,6 +20,14 @@ At the very moment, this is only at the stage of:
 Further, *no documentations*, nor *demo* environment is done yet;
 these will be supplied soon, hopefully!
 
+Author
+--
+Naoshi Tabuchi [@n_tabee](https://twitter.com/n_tabee)
+
+License
+--
+MIT License, unless otherwise explicitly stated.
+
 upstream's original introduction is left below:
 --
 
