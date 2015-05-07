@@ -4,7 +4,7 @@ H2O-tile: an H2O-based special-purpose HTTPD for OpenStreetMap tile server.
 This is
 --
 - aimed at serving *already-prepared* tiles very quick
-- *NOT* aimed ato *rendering* non-existent tiles very quick
+- *NOT* aimed at *rendering* non-existent tiles very quick
 
 As such, the implementation does not adopt so-called *meta-tiles* as the storage format:
 tiles are stored just as individual .png files.
