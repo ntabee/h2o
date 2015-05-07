@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <!-- Based on: http://leafletjs.com/examples/quick-start-example.html -->
+    <title>H2O-tile Example</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.css">
+    <script src="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.js"></script>
+</head>
+<body>
+    <div id="map" style="width: 1280px; height: 720px"></div>
+    <script>
+        var map = L.map('map').setView([35.68128, 139.76558], 13);
+
+                         // Modify "localhost:8080" to your machine's IP & port 
+        L.tileLayer('http://localhost:8080/tiles/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors, ' +
+                '<a href="http://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>', 
+            id: 'h2o-tile.examples.map'
+        }).addTo(map);
+
+
+        var popup = L.popup();
+
+        function onMapClick(e) {
+            popup
+                .setLatLng(e.latlng)
+                .setContent("You clicked the map at " + e.latlng.toString())
+                .openOn(map);
+        }
+
+        map.on('click', onMapClick);
+    </script>
+</body>
+</html>
