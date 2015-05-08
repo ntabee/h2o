@@ -20,6 +20,7 @@
 #include <mapnik/box2d.hpp>
 
 #include <boost/filesystem.hpp>
+#include <boost/format.hpp>
 
 #include <fstream>
 #include <cstdint>
