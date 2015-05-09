@@ -124,103 +124,8 @@ Done: // <- the "final state"
 
     return 1;
 
-}   
-#if 0
-static inline h2o_buffer_t tile_body(uint8_t* content) {
-    h2o_buffer_t *_;
-    h2o_buffer_init(&_, &h2o_socket_buffer_prototype);
-
-    {
-        h2o_iovec_t _s = (h2o_iovec_init(H2O_STRLIT("<!DOCTYPE html>\n<TITLE>Index of ")));
-        if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-            --_s.len;
-        h2o_buffer_reserve(&_, _s.len);
-        memcpy(_->bytes + _->size, _s.base, _s.len);
-        _->size += _s.len;
-    }
-    {
-        h2o_iovec_t _s = (path_normalized_escaped);
-        if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-            --_s.len;
-        h2o_buffer_reserve(&_, _s.len);
-        memcpy(_->bytes + _->size, _s.base, _s.len);
-        _->size += _s.len;
-    }
-    {
-        h2o_iovec_t _s = (h2o_iovec_init(H2O_STRLIT("</TITLE>\n<H2>Index of ")));
-        if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-            --_s.len;
-        h2o_buffer_reserve(&_, _s.len);
-        memcpy(_->bytes + _->size, _s.base, _s.len);
-        _->size += _s.len;
-    }
-    {
-        h2o_iovec_t _s = (path_normalized_escaped);
-        if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-            --_s.len;
-        h2o_buffer_reserve(&_, _s.len);
-        memcpy(_->bytes + _->size, _s.base, _s.len);
-        _->size += _s.len;
-    }
-    {
-        h2o_iovec_t _s = (h2o_iovec_init(H2O_STRLIT("</H2>\n<UL>\n<LI><A HREF=\"..\">Parent Directory</A>\n")));
-        if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-            --_s.len;
-        h2o_buffer_reserve(&_, _s.len);
-        memcpy(_->bytes + _->size, _s.base, _s.len);
-        _->size += _s.len;
-    }
-
-    while ((ret = readdir_r(dp, &dent, &dentp)) == 0 && dentp != NULL) {
-        h2o_iovec_t fn_escaped;
-        if (strcmp(dent.d_name, ".") == 0 || strcmp(dent.d_name, "..") == 0)
-            continue;
-        fn_escaped = h2o_htmlescape(pool, dent.d_name, strlen(dent.d_name));
-        {
-            h2o_iovec_t _s = (h2o_iovec_init(H2O_STRLIT("<LI><A HREF=\"")));
-            if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-                --_s.len;
-            h2o_buffer_reserve(&_, _s.len);
-            memcpy(_->bytes + _->size, _s.base, _s.len);
-            _->size += _s.len;
-        }
-        {
-            h2o_iovec_t _s = (fn_escaped);
-            if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-                --_s.len;
-            h2o_buffer_reserve(&_, _s.len);
-            memcpy(_->bytes + _->size, _s.base, _s.len);
-            _->size += _s.len;
-        }
-        {
-            h2o_iovec_t _s = (h2o_iovec_init(H2O_STRLIT("\">")));
-            if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-                --_s.len;
-            h2o_buffer_reserve(&_, _s.len);
-            memcpy(_->bytes + _->size, _s.base, _s.len);
-            _->size += _s.len;
-        }
-        {
-            h2o_iovec_t _s = (fn_escaped);
-            if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-                --_s.len;
-            h2o_buffer_reserve(&_, _s.len);
-            memcpy(_->bytes + _->size, _s.base, _s.len);
-            _->size += _s.len;
-        }
-        {
-            h2o_iovec_t _s = (h2o_iovec_init(H2O_STRLIT("</A>\n")));
-            if (_s.len != 0 && _s.base[_s.len - 1] == '\n')
-                --_s.len;
-            h2o_buffer_reserve(&_, _s.len);
-            memcpy(_->bytes + _->size, _s.base, _s.len);
-            _->size += _s.len;
-        }
-    }
-
-    return _;
 }
-#endif
+
 static void on_tile_rendered(h2o_req_t *req, const char* content, size_t content_length, const char* physical_tile_path, const char* mime_type, size_t mime_type_len, int flags) {
 
     struct tm last_modified_gmt;
@@ -266,7 +171,7 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
     h2o_file_handler_t *super = &(self->super);
     h2o_iovec_t mime_type;
     char *rpath;
-    size_t rpath_len, req_path_prefix, tile_path_buf_len;
+    size_t rpath_len, req_path_prefix;
     struct st_h2o_sendfile_generator_t *generator = NULL;
     size_t if_modified_since_header_index, if_none_match_header_index;
     int is_dir, is_get;
@@ -284,8 +189,7 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
 
     /* build path (still unterminated at the end of the block) */
     req_path_prefix = req->pathconf->path.len;
-    tile_path_buf_len = super->real_path.len + (req->path_normalized.len - req_path_prefix) + 28;
-    rpath = alloca(tile_path_buf_len);
+    rpath = alloca(super->real_path.len + (req->path_normalized.len - req_path_prefix) + super->max_index_file_len + 1);
     rpath_len = 0;
     memcpy(rpath + rpath_len, super->real_path.base, super->real_path.len);
     rpath_len += super->real_path.len;
@@ -295,11 +199,14 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
     rpath[rpath_len] = '\0';
     do { /* scoping */
         uint32_t x, y, z;
+        size_t tile_path_buf_len = super->real_path.len + (req->path_normalized.len - req_path_prefix) + 28;
+        char* tile_path = alloca(tile_path_buf_len);
         /* Try to convert rpath (base/z/x/y.png) to the tiles' scheme: base/z/nnn/nnn/nnn/nnn/nnn.png */
-        if (likely(tile_rewrite_path(rpath, super->real_path.base, super->real_path.len, rpath, tile_path_buf_len, &z, &x, &y))) {
+        if (likely(tile_rewrite_path(rpath, super->real_path.base, super->real_path.len, tile_path, tile_path_buf_len, &z, &x, &y))) {
+            rpath = tile_path;
             rpath_len = strlen(rpath) + 1;  /* The actual length of rpath */
             /* If successful, try to send it back as-is */
-            if ((generator = create_generator(req, rpath, rpath_len, &is_dir, super->flags)) != NULL) {
+            if ((generator = create_generator(req, tile_path, rpath_len, &is_dir, super->flags)) != NULL) {
                 goto Opened;
             }
             if (is_dir) {
@@ -318,7 +225,7 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
             return 0;
         } else {
             // If path conversion failed, fallback to on_req()
-            return on_req(_self, req);
+            return on_req((h2o_handler_t*)super, req);
         }
     } while (0);
 
@@ -355,18 +262,17 @@ static void on_dispose_tile_context(h2o_handler_t* _self, h2o_context_t* ctx) {
     dispose_mapnik(self->map);
 }
 
-/* Just an alias for now */
-#define on_dispose_tile on_dispose
-
+#define on_dispose_tile on_dispose;
 h2o_tile_handler_t *h2o_tile_register(h2o_pathconf_t *pathconf, const char *base_path, const char *style_file_path)
 {
     h2o_tile_handler_t *self;
 
     self = (void *)h2o_create_handler(pathconf, sizeof(*self));
     self->map = alloc_mapnik(style_file_path);
-
     /* super() */
-    self->super = *(h2o_file_register(pathconf, base_path, NULL, NULL, 0));
+    const char* NO_INDEX_FILES[1];
+    NO_INDEX_FILES[0] = NULL;
+    self->super = *(h2o_file_register(pathconf, base_path, NO_INDEX_FILES, NULL, 0));
     /* */
 
     /* overload callbacks */
