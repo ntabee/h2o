@@ -8,13 +8,13 @@
 #include <mapnik/color_factory.hpp>
 #if MAPNIK_MAJOR_VERSION >= 3
  #include <mapnik/image.hpp>
- #define image_32 image_rgba8
+ #include <mapnik/image_view_any.hpp>
 #else
+ #include <mapnik/image_data.hpp>
  #include <mapnik/graphics.hpp>
 #endif
 #include <mapnik/image_util.hpp>
 #include <mapnik/image_view.hpp>
-#include <mapnik/image_view_any.hpp>
 #include <mapnik/config_error.hpp>
 #include <mapnik/load_map.hpp>
 #include <mapnik/box2d.hpp>
@@ -68,8 +68,11 @@ extern "C" void render_tile(h2o_req_t* req, void* map_ptr, const char* tile_path
         /* (left, top)-(right, bottom) in Mercator projection. */ 
         double l, t, r, b; 
         image_32 image(m.width(),m.height()); 
+#if MAPNIK_MAJOR_VERSION >= 3
         image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); 
-
+#else
+        image_view<mapnik::image_data_32> vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image.data()); 
+#endif
         tile_to_merc_box(zoom, x, y, l, t, r, b); 
         box2d<double> bbox(l, t, r, b); 
         /* Double the bbox */ 
@@ -80,7 +83,11 @@ extern "C" void render_tile(h2o_req_t* req, void* map_ptr, const char* tile_path
         agg_renderer<image_32> ren(m,image); 
         ren.apply(); 
         /* Clip the center 256x256 into vw */ 
+#if MAPNIK_MAJOR_VERSION >= 3
         std::string buf = save_to_string(image_view_any(vw), "png256:e=miniz");
+#else
+        std::string buf = save_to_string(vw, "png256");
+#endif
         callback(req, buf.c_str(), buf.length(), tile_path, mime_type, mime_type_len, flags);
 
         /* write to the filesystem */

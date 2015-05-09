@@ -12,13 +12,13 @@
 #include <mapnik/color_factory.hpp>
 #if MAPNIK_MAJOR_VERSION >= 3
  #include <mapnik/image.hpp>
- #define image_32 image_rgba8
+ #include <mapnik/image_view_any.hpp>
 #else
+ #include <mapnik/image_data.hpp>
  #include <mapnik/graphics.hpp>
 #endif
 #include <mapnik/image_util.hpp>
 #include <mapnik/image_view.hpp>
-#include <mapnik/image_view_any.hpp>
 #include <mapnik/config_error.hpp>
 #include <mapnik/load_map.hpp>
 #include <mapnik/box2d.hpp>
@@ -136,7 +136,15 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
         printf("%ld/%ld (%.3lf%) done. (%ld skipped) %s %.3lf tiles/s.\n", v, total_tiles, (100.0*(double)v / total_tiles), s, timer->format(6, "%ws").c_str(), (double)v/sec); \
     } \
 }
-#define SAVE(vw, to) { save_to_file(image_view_any(vw), to, "png256:e=miniz"); }
+
+#if MAPNIK_MAJOR_VERSION >= 3
+ #define VIEW(vw, image) image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); 
+ #define SAVE(vw, to) { save_to_file(image_view_any(vw), to, "png256:e=miniz"); }
+#else
+ #define VIEW(vw, image) image_view<mapnik::image_data_32> vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image.data()); 
+ #define SAVE(vw, to) { save_to_file(vw, to, "png256"); }
+#endif
+
 #define EXISTS(p) boost::filesystem::exists(p)
 #define DO_RENDER(tile_id) { \
     unpack(tile_id, z, x, y); \
@@ -146,8 +154,6 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
         mkdir_p(boost_tile_path.parent_path()); \
                                                 \
         image_32 image(m.width(),m.height());   \
-        image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); \
-                                                \
         tile_to_merc_box(z, x, y, l, t, r, b); \
         box2d<double> bbox(l, t, r, b); \
         /* Double the bbox */ \
@@ -158,6 +164,7 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
         agg_renderer<image_32> ren(m,image); \
         ren.apply(); \
         /* Clip the center 256x256 into vw */ \
+        VIEW(vw, image) \
         SAVE(vw, tile_path); \
     } else { \
         ++skipped; \
