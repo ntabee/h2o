@@ -1404,7 +1404,11 @@ int main(int argc, char **argv)
                 conf.run_mode = RUN_MODE_TEST;
                 break;
             case 'v':
+#ifdef H2O_TILE
+                printf("h2o-tile version " H2O_VERSION ":" GIT_REVISION_SHORT "\n");
+#else
                 printf("h2o version " H2O_VERSION "\n");
+#endif
                 exit(0);
             case 'h':
                 printf("h2o version " H2O_VERSION "\n"

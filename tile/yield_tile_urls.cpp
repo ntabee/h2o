@@ -165,7 +165,7 @@ int main(int ac, char** av) {
 
             if ( vm.count("version") ) {
                 std::cout << (
-                    VERSION " (commit: " GIT_REVISION ")"                    
+                    VERSION " (commit: " GIT_REVISION_SHORT ")" 
                 ) << std::endl;
                 return 0;
             }
