@@ -266,7 +266,7 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
     h2o_file_handler_t *super = &(self->super);
     h2o_iovec_t mime_type;
     char *rpath;
-    size_t rpath_len, req_path_prefix, tile_path_len;
+    size_t rpath_len, req_path_prefix, tile_path_buf_len;
     struct st_h2o_sendfile_generator_t *generator = NULL;
     size_t if_modified_since_header_index, if_none_match_header_index;
     int is_dir, is_get;
@@ -284,8 +284,8 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
 
     /* build path (still unterminated at the end of the block) */
     req_path_prefix = req->pathconf->path.len;
-    tile_path_len = super->real_path.len + (req->path_normalized.len - req_path_prefix) + 28;
-    rpath = alloca(tile_path_len);
+    tile_path_buf_len = super->real_path.len + (req->path_normalized.len - req_path_prefix) + 28;
+    rpath = alloca(tile_path_buf_len);
     rpath_len = 0;
     memcpy(rpath + rpath_len, super->real_path.base, super->real_path.len);
     rpath_len += super->real_path.len;
@@ -296,10 +296,10 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
     do { /* scoping */
         uint32_t x, y, z;
         /* Try to convert rpath (base/z/x/y.png) to the tiles' scheme: base/z/nnn/nnn/nnn/nnn/nnn.png */
-        if (likely(tile_rewrite_path(rpath, super->real_path.base, super->real_path.len, rpath, tile_path_len, &z, &x, &y))) {
-            rpath_len = tile_path_len;  // Now, rpath_len was changed.
+        if (likely(tile_rewrite_path(rpath, super->real_path.base, super->real_path.len, rpath, tile_path_buf_len, &z, &x, &y))) {
+            rpath_len = strlen(rpath) + 1;  /* The actual length of rpath */
             /* If successful, try to send it back as-is */
-            if ((generator = create_generator(req, rpath, tile_path_len, &is_dir, super->flags)) != NULL) {
+            if ((generator = create_generator(req, rpath, rpath_len, &is_dir, super->flags)) != NULL) {
                 goto Opened;
             }
             if (is_dir) {
@@ -310,7 +310,7 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
             /* failed to open */
             if (errno == ENOENT) {
                 /* If create_generator() failed (i.e. tile_path is non-existent), invoke renderer */
-                mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, tile_path_len));
+                mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
                 render_tile(req, self->map, rpath, z, x, y, mime_type.base, mime_type.len, super->flags, on_tile_rendered);
             } else {
                 h2o_send_error(req, 403, "Access Forbidden", "access forbidden", 0);
@@ -336,7 +336,7 @@ Opened:
     }
 
     /* obtain mime type */
-    mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, tile_path_len));
+    mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
 
     /* return file */
     do_send_file(generator, req, 200, "OK", mime_type, is_get);
