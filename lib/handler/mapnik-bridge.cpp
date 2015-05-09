@@ -9,6 +9,7 @@
 #if MAPNIK_MAJOR_VERSION >= 3
  #include <mapnik/image.hpp>
  #include <mapnik/image_view_any.hpp>
+ #define image_32 image_rgba8
 #else
  #include <mapnik/image_data.hpp>
  #include <mapnik/graphics.hpp>
