@@ -318,11 +318,14 @@ ENDIF (APPLE)
 
 ##############    
 # h2o-tile server
+ADD_CUSTOM_COMMAND(OUTPUT include/git-revision.h DEPENDS .git/HEAD .git/index COMMAND /bin/sh gen-git-revision.sh > $@)
+
 INCLUDE_DIRECTORIES(tile)
 
 SET(TILE_SOURCE_FILES
     ${LIB_SOURCE_FILES}
 ##############    
+    include/git-revision.h
     lib/handler/tile-hook.c
     lib/handler/configurator/tile.c
     lib/handler/mapnik-bridge.cpp
@@ -365,7 +368,6 @@ INCLUDE_DIRECTORIES(
     /usr/local/include
 )
 
-ADD_CUSTOM_COMMAND(OUTPUT include/git-revision.h DEPENDS .git/HEAD .git/index COMMAND /bin/sh gen-git-revision.sh > $@)
 #   yield-tiles
 PROJECT(yield-tiles CXX)
 FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem thread program_options regex timer)
