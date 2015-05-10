@@ -15,8 +15,9 @@ Status
 At the very moment, a quick setup script is placed at `examples/tile-demo`, 
 it builds a tiny demo-purpose tile server, covering a small region around Tokyo, Japan.
 
-*No documentations*, ~~nor *demo* environment~~ is done yet (will be supplied soon, hopefully!),
-but a [live demo](http://h2o-tile-demo.ddns.net:8080/) is running on Amazon EC2
+A brief instruction of the setup is in [INSTALL.md](INSTALL.md).
+
+A [live demo](http://h2o-tile-demo.ddns.net:8080/) is running on Amazon EC2
 
 
 Author
