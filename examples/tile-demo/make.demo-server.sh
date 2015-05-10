@@ -31,14 +31,14 @@
 ##      + I **STRONGLY RECOMMEND** to mount /opt to a **Btrfs-formatted** partition, because...
 ##          the tiles/ dir will contain huge, really huge number of files:
 ##          even with our tiny region, we will potentially have **multi-millions** of .png iamges at the maximum zoom level.
-##          Good old ext4 is, certainly, not suitable t such a usecase (what if # of files gets multi-billions?)
+##          Good old ext4 is, certainly, not suitable to such a usecase (what if # of files gets multi-billions?)
 ##          On the other hand, btrfs does not limit inodes a priori.
 ##        Mounting a btrfs partition, in a simplest form, is:
 ##          $ sudo sudo apt-get -qq install btrfs-tools
 ##          $ sudo mkfs.btrfs -O^extref -m single /dev/part/for/tiles
 ##          $ sudo vi /etc/fstab # and add the following line
 ##          /dev/part/for/tiles  /opt       btrfs   auto,noexec,noatime,autodefrag,compress=lzo,space_cache      0       2
-##          # "compress=lzo" may not be very effective.
+##          # "compress=lzo" may not be very effective, however.
 
 sudo apt-get -qq update
 sudo useradd -m -s /bin/bash -d /opt/osm osm
