@@ -13,12 +13,14 @@ tiles are stored just as individual .png files.
 Status
 --
 At the very moment, this is only at the stage of:
-- just managed to work on my personal Linux box
-- with a tiny dataset (covering Tokyo), and
+- ~~just managed to work on my personal Linux box~~
+  a quick setup script is placed at `examples/tile-demo`, 
+  it builds a tiny demo-purpose tile server, covering a small region around Tokyo, Japan.
 - tested by a quick & cheap [wrk](https://github.com/wg/wrk) script
 
-Further, *no documentations*, nor *demo* environment is done yet;
-these will be supplied soon, hopefully!
+*No documentations*, ~~nor *demo* environment~~ is done yet (will be supplied soon, hopefully!),
+but a [live demo](http://h2o-tile-demo.ddns.net:8080/) is running on Amazon EC2
+
 
 Author
 --
