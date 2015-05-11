@@ -17,7 +17,7 @@
 #else
  #include <mapnik/image_data.hpp>
  #include <mapnik/graphics.hpp>
-#endif
+#endif 
 #include <mapnik/image_util.hpp>
 #include <mapnik/image_view.hpp>
 #include <mapnik/config_error.hpp>
@@ -60,6 +60,9 @@
 # define likely(x) (x)
 # define unlikely(x) (x)
 #endif
+
+#define CANVAS_SCALE 8
+#define RENDER_SIZE (TILE_SIZE*(CANVAS_SCALE+1))
 
 void mkdir_p(const boost::filesystem::path& base_path) {
     if (likely(boost::filesystem::exists(base_path))) {
@@ -107,7 +110,8 @@ boost::timer::cpu_timer* timer;
 
 void renderer(const boost::filesystem::path& xml, const boost::filesystem::path& base_path) {
     using namespace mapnik;
-    Map m(TILE_SIZE*2, TILE_SIZE*2);    // To avoid label scattering, we render a 2x2 larger area and then clip the center.
+
+    Map m(CANVAS_SCALE*TILE_SIZE, CANVAS_SCALE*TILE_SIZE);
     mapnik::load_map(m, xml.string());
 
     const std::string& base_as_string = base_path.string();
@@ -130,7 +134,7 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
 
 #define INC_COUNT() { \
     uint64_t v = ++rendered; \
-    if (unlikely(v % 1000 == 0)) { \
+    if (unlikely(v % 100 == 0)) { \
         uint64_t s = skipped; \
         /* cout << XX << ... is not atomic */ \
         double sec = (double)timer->elapsed().wall/(1000UL*1000UL*1000UL); \
@@ -139,38 +143,50 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
 }
 
 #if MAPNIK_MAJOR_VERSION >= 3
- #define VIEW(vw, image) image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); 
+// #define VIEW(vw, image) image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); 
+ #define VIEW(vw, image) image_view_rgba8 vw(x1*TILE_SIZE, y1*TILE_SIZE, TILE_SIZE, TILE_SIZE, image); 
  #define SAVE(vw, to) { save_to_file(image_view_any(vw), to, "png256:e=miniz"); }
 #else
- #define VIEW(vw, image) image_view<mapnik::image_data_32> vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image.data()); 
+// #define VIEW(vw, image) image_view<mapnik::image_data_32> vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image.data()); 
+ #define VIEW(vw, image) image_view<mapnik::image_data_32> vw(x1*TILE_SIZE, y1*TILE_SIZE, TILE_SIZE, TILE_SIZE, image.data()); 
  #define SAVE(vw, to) { save_to_file(vw, to, "png256"); }
 #endif
 
 #define EXISTS(p) boost::filesystem::exists(p)
 #define DO_RENDER(tile_id) { \
     unpack(tile_id, z, x, y); \
-    to_physical_path(tp_head, z, x, y, PNG); \
-    boost::filesystem::path boost_tile_path = boost::filesystem::path(tile_path); \
-    if ( likely(!(skip_existing && EXISTS(boost_tile_path))) )  { \
-        mkdir_p(boost_tile_path.parent_path()); \
-                                                \
-        image_32 image(m.width(),m.height());   \
-        tile_to_merc_box(z, x, y, l, t, r, b); \
-        box2d<double> bbox(l, t, r, b); \
-        /* Double the bbox */ \
-        bbox.width(bbox.width() * 2); \
-        bbox.height(bbox.height() * 2); \
-        /* Render */ \
-        m.zoom_to_box(bbox); \
-        agg_renderer<image_32> ren(m,image); \
-        ren.apply(); \
-        /* Clip the center 256x256 into vw */ \
-        VIEW(vw, image) \
-        SAVE(vw, tile_path); \
-    } else { \
-        ++skipped; \
+    uint32_t bound = 1 << z; \
+    if (bound - x < CANVAS_SCALE) { x = 0; } \
+    if (bound - y < CANVAS_SCALE) { y = 0; } \
+    uint32_t render_size_tx = std::min(CANVAS_SCALE, (1 << z)); \
+    uint32_t render_size_ty = std::min(CANVAS_SCALE, (1 << z)); \
+    uint32_t x2, y2; \
+    x2 = std::min(render_size_tx, bound); \
+    y2 = std::min(render_size_ty, bound); \
+    m.resize(render_size_tx*TILE_SIZE, render_size_ty*TILE_SIZE); \
+    image_32 image(render_size_tx*TILE_SIZE, render_size_ty*TILE_SIZE); \
+    tile_to_merc(z, x, y, l, t); \
+    tile_to_merc(z, x+render_size_tx, y+render_size_ty, r, b); \
+    box2d<double> bbox(l, t, r, b); \
+    m.zoom_to_box(bbox); \
+    agg_renderer<image_32> ren(m,image); \
+    ren.apply(); \
+    for (int x1=0; x1<x2; ++x1) { \
+        for (int y1=0; y1<y2; ++y1) { \
+            to_physical_path(tp_head, z, x1, y1, PNG); \
+            boost::filesystem::path boost_tile_path = boost::filesystem::path(tile_path); \
+            if ( likely(!(skip_existing && EXISTS(boost_tile_path))) )  { \
+                mkdir_p(boost_tile_path.parent_path()); \
+                                                        \
+                /* Clip the center 256x256 into vw */ \
+                VIEW(vw, image) \
+                SAVE(vw, tile_path); \
+            } else { \
+                ++skipped; \
+            } \
+            INC_COUNT(); \
+        } \
     } \
-    INC_COUNT(); \
 } // DO_RENDER()
 
     triplet tile_id;
@@ -473,21 +489,39 @@ int main(int ac, char** av) {
         std::cout 
             << "  # of tiles  : " << std::endl
         ;
-        uint32_t tx_left, ty_top, tx_right, ty_bottom;
+
         for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
+            uint32_t tx_left, ty_top, tx_right, ty_bottom;
             lonlat_to_tile(x1, y1, z, tx_left, ty_top);
             lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
-
-            uint64_t rows = (uint64_t)(ty_bottom - ty_top + 1);
-            uint64_t cols = (uint64_t)(tx_right - tx_left + 1);
-            uint64_t tiles = rows * cols;
-            total_tiles += tiles;
+            uint64_t tiles = 0;
+            for (uint32_t y = ty_top; y <= ty_bottom; y+=CANVAS_SCALE) {
+                for (uint32_t x = tx_left; x <= tx_right; x+=CANVAS_SCALE) {
+                    uint32_t render_size_tx = std::min(CANVAS_SCALE, (1 << z)); \
+                    uint32_t render_size_ty = std::min(CANVAS_SCALE, (1 << z)); \
+                    tiles += render_size_tx*render_size_ty;
+                }
+            }
             std::cout 
                 << "    Zoom " << (boost::format("%|2|") % z) << ": " << tiles << std::endl;
+
+            total_tiles+=tiles;
         }
         std::cout 
             << "    Total  : " << total_tiles << std::endl
         ;
+        // for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
+        //     uint32_t tx_left, ty_top, tx_right, ty_bottom;
+        //     lonlat_to_tile(x1, y1, z, tx_left, ty_top);
+        //     lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
+
+        //     uint64_t rows = (uint64_t)(ty_bottom - ty_top + 1);
+        //     uint64_t cols = (uint64_t)(tx_right - tx_left + 1);
+        //     uint64_t tiles = rows * cols;
+        //     total_tiles += tiles;
+        //     std::cout 
+        //         << "    Zoom " << (boost::format("%|2|") % z) << ": " << tiles << std::endl;
+        // }
 
         if (dry_run) {
             return 0;
@@ -506,11 +540,13 @@ int main(int ac, char** av) {
 
         // Emit!
         for (uint32_t z = (uint32_t)z1; z <= (uint32_t)z2; ++z) {
+            uint32_t tx_left, ty_top, tx_right, ty_bottom;
             lonlat_to_tile(x1, y1, z, tx_left, ty_top);
             lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
-            for (uint32_t y = ty_top; y <= ty_bottom; ++y) {
-                for (uint32_t x = tx_left; x <= tx_right; ++x) {
-                    while (!queue.push(pack(z, x, y))) {}
+            for (uint32_t y = ty_top; y <= ty_bottom; y+=CANVAS_SCALE) {
+                for (uint32_t x = tx_left; x <= tx_right; x+=CANVAS_SCALE) {
+                    uint64_t tile_id = pack(z, x, y);
+                    while (!queue.push(tile_id)) {}
                 }
             }
         }
