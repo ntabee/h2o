@@ -38,6 +38,7 @@
 #include <fstream>
 #include <iostream>
 #include <tuple>
+#include <boost/foreach.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 #include <boost/regex.hpp>
@@ -111,6 +112,7 @@ boost::timer::cpu_timer* timer;
 void renderer(const boost::filesystem::path& xml, const boost::filesystem::path& base_path) {
     using namespace mapnik;
 
+    // Render CANVAS_SCALE^2 = 64 tiles
     Map m(CANVAS_SCALE*TILE_SIZE, CANVAS_SCALE*TILE_SIZE);
     mapnik::load_map(m, xml.string());
 
@@ -128,7 +130,6 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
         ++tp_head;
     }
 
-
     /* (left, top)-(right, bottom) in Mercator projection. */ 
     double l, t, r, b; 
 
@@ -143,11 +144,9 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
 }
 
 #if MAPNIK_MAJOR_VERSION >= 3
-// #define VIEW(vw, image) image_view_rgba8 vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image); 
  #define VIEW(vw, image) image_view_rgba8 vw(x1*TILE_SIZE, y1*TILE_SIZE, TILE_SIZE, TILE_SIZE, image); 
  #define SAVE(vw, to) { save_to_file(image_view_any(vw), to, "png256:e=miniz"); }
 #else
-// #define VIEW(vw, image) image_view<mapnik::image_data_32> vw(TILE_SIZE/2, TILE_SIZE/2, TILE_SIZE, TILE_SIZE, image.data()); 
  #define VIEW(vw, image) image_view<mapnik::image_data_32> vw(x1*TILE_SIZE, y1*TILE_SIZE, TILE_SIZE, TILE_SIZE, image.data()); 
  #define SAVE(vw, to) { save_to_file(vw, to, "png256"); }
 #endif
@@ -155,6 +154,7 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
 #define EXISTS(p) boost::filesystem::exists(p)
 #define DO_RENDER(tile_id) { \
     unpack(tile_id, z, x, y); \
+    /* If 8x8 tiles exceed the planet bounds, adjust */ \
     uint32_t bound = 1 << z; \
     if (bound - x < CANVAS_SCALE) { x = 0; } \
     if (bound - y < CANVAS_SCALE) { y = 0; } \
@@ -165,12 +165,33 @@ void renderer(const boost::filesystem::path& xml, const boost::filesystem::path&
     y2 = std::min(render_size_ty, bound); \
     m.resize(render_size_tx*TILE_SIZE, render_size_ty*TILE_SIZE); \
     image_32 image(render_size_tx*TILE_SIZE, render_size_ty*TILE_SIZE); \
+    /* Deduce the coordinates from z, x, y */ \
     tile_to_merc(z, x, y, l, t); \
     tile_to_merc(z, x+render_size_tx, y+render_size_ty, r, b); \
+    /* Check if at least one tile in 8x8 should be rendered */ \
+    if (skip_existing)  { \
+        bool all_exists = true; \
+        for (int x1=0; x1<x2; ++x1) { \
+            for (int y1=0; y1<y2; ++y1) { \
+                to_physical_path(tp_head, z, x1, y1, PNG); \
+                boost::filesystem::path boost_tile_path = boost::filesystem::path(tile_path); \
+                if ( !EXISTS(boost_tile_path) )  { \
+                    all_exists = false; \
+                } else { \
+                    ++skipped; \
+                    INC_COUNT(); \
+                }\
+            } \
+        } \
+        if ( unlikely(all_exists) ) { \
+            continue; \
+        } \
+    } \
     box2d<double> bbox(l, t, r, b); \
     m.zoom_to_box(bbox); \
     agg_renderer<image_32> ren(m,image); \
     ren.apply(); \
+    /* Each 8x8 tiles are stored as individual files */ \
     for (int x1=0; x1<x2; ++x1) { \
         for (int y1=0; y1<y2; ++y1) { \
             to_physical_path(tp_head, z, x1, y1, PNG); \
@@ -310,6 +331,7 @@ yield-tiles -c render-def.xml -p base-path [-z z1-z2] [-b x1,y1,x2,y2] [-t num-t
 generates tiles bounded by the box (x1, y1)-(x2, y2) for zoom levels in [z1, z2] into base-path.
 Options:
     -c,--config render-def.xml: a mapnik conf. file, typically of openstreetmap-carto or alike. REQUIRED
+    -m,--mapnik /path/to/lib/mapnik: the path to mapnik library
     -p,--prefix base-path: a valid directory name, into which tiles are rendered
     -z,--zoom z1-z2: zoom levels in [0, ..., 20] to render
         + values less/greater than 0/20 are fit to 0/20 resp. 
@@ -331,7 +353,9 @@ Options:
 int main(int ac, char** av) {
     try { 
         std::string config;
+        std::string mapnik_path;
         std::string base;
+        std::string font_paths;
         argv::zoom::pair_t zoom_levels;
         argv::bbox::box_t  bbox;
         unsigned int nthreads;
@@ -347,8 +371,10 @@ int main(int ac, char** av) {
         desc.add_options() 
             ("help,h", "Prints help messages")
             ("version,v", "Prints version info.")
-            ("config,c", po::value<std::string>(&config)->value_name("render-def.xml")->required(), "Specifies a mapnik config file (such as of openstreetmap-carto)") 
+            ("config,c", po::value<std::string>(&config)->value_name("render-def.xml")->default_value("/usr/local/lib/mapnik"), "Specifies a mapnik config file (such as of openstreetmap-carto)") 
+            ("mapnik,m", po::value<std::string>(&mapnik_path)->value_name("/path/to/lib/mapnik")->default_value("/usr/local/lib/mapnik"), "Specifies the path of mapnik library, defaults to /usr/local/mapnik") 
             ("prefix,p", po::value<std::string>(&base)->value_name("base-path")->required(), "Specifies the base directory into which tile are rendered") 
+            ("fonts,f", po::value<std::string>(&font_paths)->value_name("font-paths")->default_value("/usr/local/lib/mapnik/fonts:/usr/share/fonts"), "Specifies a ':'-separated list of directories to search fonts") 
             ("zoom,z", 
                 po::value<argv::zoom::pair_t>(&zoom_levels)->value_name("z1-z2")->default_value(argv::zoom::pair_t{0, 16}, "0-16"), 
                 "Specifies zoom levels to render, between 0-20\n"
@@ -529,9 +555,13 @@ int main(int ac, char** av) {
 
         // FIXME: Paths should be coufigurable.
         using namespace mapnik;
-        datasource_cache::instance().register_datasources("/usr/local/lib/mapnik/input");
-        load_fonts("/usr/local/lib/mapnik/fonts");
-        load_fonts("/usr/share/fonts");
+        datasource_cache::instance().register_datasources( (boost::filesystem::path(mapnik_path) / "input").string() );
+        std::list<std::string> font_path_list;
+        boost::split(font_path_list, font_paths, boost::is_any_of(":;,"));
+
+        BOOST_FOREACH(std::string p, font_path_list) {
+            load_fonts(p.c_str());
+        }
 
         // Awake renderer threads
         boost::thread_group consumer_threads;
@@ -543,6 +573,7 @@ int main(int ac, char** av) {
             uint32_t tx_left, ty_top, tx_right, ty_bottom;
             lonlat_to_tile(x1, y1, z, tx_left, ty_top);
             lonlat_to_tile(x2, y2, z, tx_right, ty_bottom);
+            // To boost rendering, each queue element requests CANVAS_SCALE^2 = 8*8 = 64 tiles at once.
             for (uint32_t y = ty_top; y <= ty_bottom; y+=CANVAS_SCALE) {
                 for (uint32_t x = tx_left; x <= tx_right; x+=CANVAS_SCALE) {
                     uint64_t tile_id = pack(z, x, y);
