@@ -1,0 +1,7 @@
+wget http://openresty.org/download/ngx_openresty-1.7.10.1.tar.gz
+export CFLAGS="-O3 -mtune=native -march=native"
+#sudo so that /sbin/ldconfig is found
+sudo ./configure --with-luajit --with-cc=gcc --with-cc-opt="$CFLAGS" --with-luajit-xcflags="$CFLAGS" --prefix=/usr --conf-path=/etc/nginx/nginx.conf
+sudo make -j 4
+sudo make install
+sudo cp ./nginx.conf /etc/nginx
