@@ -14,3 +14,4 @@ xcuserdata
 misc/test-ca/demoCA/newcerts/*.pem
 tmp/
 wrk/paths.txt
+include/git-revision.h

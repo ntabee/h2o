@@ -6,6 +6,16 @@ if [ "$1" = "" ]; then
     exit 1
 fi
 
-bash ./gen-paths.sh > paths.txt
+if [ -e paths.txt.bz2 ]; then
+    echo 'Decompres the path list to fetch...'
+    bunzip2 -k paths.txt.bz2
+    echo 'done.'
+fi
+
+if [ ! -e paths.txt ]; then
+    echo 'Generate the path list to fetch...'
+    bash ./gen-paths.sh > paths.txt
+    echo 'done.'
+fi
 
 wrk --latency -c 1000 -t 4 -d 10 -s traverse.lua "$1"
