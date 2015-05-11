@@ -6,6 +6,6 @@ if [ "$1" = "" ]; then
     exit 1
 fi
 
-./gen-paths.sh > paths.txt
+bash ./gen-paths.sh > paths.txt
 
 wrk -c 1000 -t 4 -d 10 -s traverse.lua "$1"
