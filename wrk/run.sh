@@ -8,4 +8,4 @@ fi
 
 ./gen-paths.sh > paths.txt
 
-wrk -c 1000 -t 4 -d 30s -s traverse.lua "$1"
+wrk -c 1000 -t 4 -d 10 -s traverse.lua "$1"
