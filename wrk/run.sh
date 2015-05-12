@@ -6,7 +6,7 @@ if [ "$1" = "" ]; then
     exit 1
 fi
 
-if [ -e paths.txt.bz2 ]; then
+if [ -e paths.txt.bz2 -a ! -e paths.txt ]; then
     echo 'Decompres the path list to fetch...'
     bunzip2 -k paths.txt.bz2
     echo 'done.'
