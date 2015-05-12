@@ -91,27 +91,6 @@ sudo apt-get -qq install gdal-bin
 sudo apt-get -qq install cmake
 sudo apt-get -qq install wget
 
-# Optimize networking stack
-# cf. http://qiita.com/cubicdaiya/items/235777dc401ec419b14e
-# N.B. some parameters aren't recognized on containers and must be set on the host
-cat > /tmp/net.optimize <<EOF
-net.ipv4.tcp_tw_recycle = 1
-net.ipv4.tcp_tw_reuse = 1
-net.ipv4.tcp_fin_timeout = 1
-net.core.somaxconn = 32768
-net.core.netdev_max_backlog = 32768
-net.ipv4.tcp_max_syn_backlog = 32768
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-net.ipv4.tcp_rmem = 4096 349520 16777216
-net.ipv4.tcp_wmem = 4096 65536 16777216
-net.ipv4.ip_local_port_range = 1024 65535
-net.ipv4.tcp_timestamps = 0
-EOF
-
-sudo sh -c "cat /tmp/net.optimize >> /etc/sysctl.conf"
-sudo sysctl -p /etc/sysctl.conf
-
 ## Install fonts
 cd /tmp
 wget -O Gargi-2.0.tar.xz http://sourceforge.net/projects/indlinux/files/Fonts/Gargi-2.0.tar.xz/download
