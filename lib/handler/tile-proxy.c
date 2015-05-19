@@ -89,7 +89,9 @@ static void on_setup_ostream(h2o_filter_t *_self, h2o_req_t *req, h2o_ostream_t 
         if (store_tile->fd < 0) {
             h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Could not open file %s: %s\n", store_tile->tmp_tile_path.base, strerror(errno));
         }
-    } 
+    } else {
+        h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Upstream returned %d: %s\n", req->res.status, req->res.reason);
+    }
 
     h2o_setup_next_ostream(&self->super, req, slot);
 }
