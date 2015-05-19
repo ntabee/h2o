@@ -28,7 +28,7 @@ License
 --
 MIT License, unless otherwise explicitly stated.
 
-upstream's original introduction is left below:
+upstream's original credits is:
 --
 
 H2O - an optimized HTTP server with support for HTTP/1.x and HTTP/2
