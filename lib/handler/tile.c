@@ -3,9 +3,12 @@
 #include <stdio.h>
 #include <errno.h>
 #include <ctype.h>
+#include <strings.h>
 #include "path-mapper.h"
-#include "tile/tile_rewrite_path.h"
+#include "tile/tile-rewrite-path.h"
+#include "tile/boost-bridge.h"
 #include "tile/mapnik-bridge.h"
+#include "tile/tile-proxy.h"
 
 struct st_h2o_tile_handler_t {
     h2o_file_handler_t super;
@@ -20,6 +23,7 @@ struct st_h2o_tile_handler_t {
 # define likely(x) (x)
 # define unlikely(x) (x)
 #endif
+
 
 static void on_tile_rendered(h2o_req_t *req, const char* content, size_t content_length, const char* physical_tile_path, const char* mime_type, size_t mime_type_len, int flags) {
 
@@ -47,6 +51,7 @@ static void on_tile_rendered(h2o_req_t *req, const char* content, size_t content
     if (etag_len != 0) {
         h2o_add_header(&req->pool, &req->res.headers, H2O_TOKEN_ETAG, etag_buf, etag_len);
     }
+    req->res.content_length = content_length;
     h2o_send_inline(req, content, content_length);
 
 }
@@ -111,9 +116,13 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
             }
             /* failed to open */
             if (errno == ENOENT) {
-                /* If create_generator() failed (i.e. tile_path is non-existent), invoke renderer */
+                 /* If create_generator() failed (i.e. tile_path is non-existent), invoke renderer */
                 mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
-                render_tile(req, self->map, rpath, z, x, y, mime_type.base, mime_type.len, super->flags, on_tile_rendered);
+#ifdef H2O_TILE_PROXY
+                assert(!"unreachable");
+#else
+                render_tile(req, self->map, rpath, z, x, y, mime_type.base, mime_type.len, super->flags, on_tile_rendered);               
+#endif
             } else {
                 h2o_send_error(req, 403, "Access Forbidden", "access forbidden", 0);
             }
@@ -157,14 +166,16 @@ static void on_dispose_tile_context(h2o_handler_t* _self, h2o_context_t* ctx) {
     dispose_mapnik(self->map);
 }
 
+
 #define on_dispose_tile on_dispose;
-h2o_tile_handler_t *h2o_tile_register(h2o_pathconf_t *pathconf, const char *base_path, const char *style_file_path)
+h2o_tile_handler_t *h2o_tile_register(h2o_pathconf_t *pathconf, const char *base_path, const char* style_file_path)
 {
     h2o_tile_handler_t *self;
 
     self = (void *)h2o_create_handler(pathconf, sizeof(*self));
-    self->map = alloc_mapnik(style_file_path);
+
     /* super() */
+    /* Don't let super try to respond the default index.html */
     const char* NO_INDEX_FILES[1];
     NO_INDEX_FILES[0] = NULL;
     self->super = *(h2o_file_register(pathconf, base_path, NO_INDEX_FILES, NULL, 0));
@@ -179,6 +190,7 @@ h2o_tile_handler_t *h2o_tile_register(h2o_pathconf_t *pathconf, const char *base
     self->style_file_path = h2o_strdup(NULL, style_file_path, SIZE_MAX);
     self->map = alloc_mapnik(style_file_path);
 
+
     return self;
 }
-/*--------------------*/
+

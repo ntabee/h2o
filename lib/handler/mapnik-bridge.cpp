@@ -36,32 +36,43 @@
 
 #include "proj.hpp"
 #include "path-mapper.h"
-#include "mapnik-bridge.h"
+#include "tile/mapnik-bridge.h"
+#include "tile/mkdir-p.h"
 
-#if __GNUC__ >= 3
-# define likely(x) __builtin_expect(!!(x), 1)
-# define unlikely(x) __builtin_expect(!!(x), 0)
-#else
-# define likely(x) (x)
-# define unlikely(x) (x)
-#endif
-void mkdir_p(const boost::filesystem::path& base_path) {
-    if (likely(boost::filesystem::exists(base_path))) {
-        boost::filesystem::path canonical = boost::filesystem::canonical(base_path);
-        if (unlikely(!boost::filesystem::is_directory(canonical))) {
-            std::string message = str(boost::format("Error: %1% exists, but not a directory.\n") % base_path);
-            throw std::runtime_error( message );
-        }
-    } else {
-        boost::filesystem::create_directories(base_path);
+extern "C" {
+
+void save_tile(h2o_req_t* req, const char* tile_path, const char* data, size_t len, const char* mime_type, size_t mime_type_len, int flags, tile_rendered_callback callback) {
+    /* write to the filesystem */
+    /* 
+    As the rendered image was already h2o_send_inline'ed in the callback, 
+    any errors in saving it to a file will be just error-logged: 
+    response to the client is NOT affected: no such thing as "500 Internal Server Error."
+    */
+    callback(req, data, len, tile_path, mime_type, mime_type_len, flags);
+
+    size_t tmp_path_len = strlen(tile_path)+18;
+    char *tmp_tile_path = static_cast<char*>(alloca(tmp_path_len));
+    snprintf(tmp_tile_path, tmp_path_len, "%s.%x", tile_path, pthread_self());
+    mkdir_p_parent(tmp_tile_path);
+    int fd = open(tmp_tile_path, O_WRONLY | O_TRUNC | O_CREAT, 0666);
+    if (fd < 0) {
+        h2o_req_log_error(req, "lib/handler/mapnik-bridge.cpp", "Could not open file %s: %s\n", tmp_tile_path, strerror(errno));
     }
+    int v = write(fd, data, len);
+    if (v != len) {
+        h2o_req_log_error(req, "lib/handler/mapnik-bridge.cpp", "Failed to write to file %s: %s\n", tmp_tile_path, strerror(errno));
+        close(fd);
+        unlink(tmp_tile_path);
+    }
+    close(fd);
+    rename(tmp_tile_path, tile_path);
 }
 
-extern "C" void render_tile(h2o_req_t* req, void* map_ptr, const char* tile_path, uint32_t zoom, uint32_t x, uint32_t y, const char* mime_type, size_t mime_type_len, int flags, tile_rendered_callback callback) {
+void render_tile(h2o_req_t* req, void* map_ptr, const char* tile_path, uint32_t zoom, uint32_t x, uint32_t y, const char* mime_type, size_t mime_type_len, int flags, tile_rendered_callback callback) {
 
     try {
         using namespace mapnik;
-        boost::filesystem::path path(tile_path);
+//        boost::filesystem::path path(tile_path);
 
         const Map _map = *(Map*)map_ptr;
         Map m(_map);    // clone
@@ -89,22 +100,7 @@ extern "C" void render_tile(h2o_req_t* req, void* map_ptr, const char* tile_path
 #else
         std::string buf = save_to_string(vw, "png256");
 #endif
-        callback(req, buf.c_str(), buf.length(), tile_path, mime_type, mime_type_len, flags);
-
-        /* write to the filesystem */
-        /* 
-        As the rendered image was already h2o_send_inline'ed in the callback, 
-        any errors in saving it to a file will be just error-logged: 
-        response to the client is NOT affected: no such thing as "500 Internal Server Error."
-        */
-        try {
-            mkdir_p(path.parent_path());
-
-            std::ofstream ofs(tile_path, std::ios_base::out | std::ios_base::binary);
-            ofs.write(buf.c_str(), buf.length());
-        } catch (std::exception& e) {
-            h2o_req_log_error(req, "lib/handler/mapnik-bridge.cpp", "%s", e.what());
-        }
+        save_tile(req, tile_path, buf.c_str(), buf.length(), H2O_STRLIT("image/png"), 0, callback);
     } catch (std::exception& e) {
         h2o_req_log_error(req, "lib/handler/mapnik-bridge.cpp", "%s", e.what());
         req->res.status = 500;
@@ -114,7 +110,7 @@ extern "C" void render_tile(h2o_req_t* req, void* map_ptr, const char* tile_path
 
 }
 
-extern "C" void* alloc_mapnik(const char* style_path) {
+void* alloc_mapnik(const char* style_path) {
     // To avoid label scattering, we render a 2x2 larger area and then clip the center.
     mapnik::Map* m = new mapnik::Map(TILE_SIZE*2, TILE_SIZE*2);    
     // Any failure in parsing the style file will immediately cause abortion by an unhandled exception, this is intended.
@@ -122,12 +118,12 @@ extern "C" void* alloc_mapnik(const char* style_path) {
     return m;
 }
 
-extern "C" void dispose_mapnik(void* m) {
+void dispose_mapnik(void* m) {
     mapnik::Map* map = (mapnik::Map*)m;
     delete map;
 }
 
-extern "C" void init_mapnik_datasource(const char* datasource) {
+void init_mapnik_datasource(const char* datasource) {
     if (datasource == NULL) {
         datasource = "/usr/local/lib/mapnik/input";
     }
@@ -147,7 +143,7 @@ extern "C" void init_mapnik_datasource(const char* datasource) {
     mapnik::datasource_cache::instance().register_datasources(datasource);
 }
 
-extern "C" void load_fonts(const char *font_dir) {
+void load_fonts(const char *font_dir) {
     DIR *fonts = opendir(font_dir);
     struct dirent *entry;
     char path[PATH_MAX]; // FIXME: Eats lots of stack space when recursive
@@ -179,4 +175,6 @@ extern "C" void load_fonts(const char *font_dir) {
         }
     }
     closedir(fonts);
+}
+
 }

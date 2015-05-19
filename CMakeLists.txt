@@ -326,7 +326,6 @@ SET(TILE_SOURCE_FILES
     ${LIB_SOURCE_FILES}
 ##############    
     include/git-revision.h
-    lib/handler/tile-hook.c
     lib/handler/configurator/tile.c
     lib/handler/mapnik-bridge.cpp
 ##############    
@@ -355,6 +354,46 @@ FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem)
 
 TARGET_LINK_LIBRARIES(h2o-tile ${MAPNIK_LIBRARIES} ${Boost_LIBRARIES} )
 INSTALL(TARGETS h2o-tile
+    RUNTIME DESTINATION bin
+)
+
+##############    
+# h2o-tile proxy
+ADD_CUSTOM_COMMAND(OUTPUT include/git-revision.h DEPENDS .git/HEAD .git/index COMMAND /bin/sh gen-git-revision.sh > $@)
+
+INCLUDE_DIRECTORIES(tile)
+
+SET(TILE_SOURCE_FILES
+    ${LIB_SOURCE_FILES}
+##############    
+    include/git-revision.h
+    lib/handler/configurator/tile.c
+##############    
+)
+
+ADD_EXECUTABLE(h2o-tile-proxy
+    ${TILE_SOURCE_FILES}
+    ${LIBYAML_SOURCE_FILES}
+    src/main.c)
+SET_SOURCE_FILES_PROPERTIES(lib/handler/mapnik-bridge.cpp PROPERTIES COMPILE_FLAGS -std=c++11)
+SET_TARGET_PROPERTIES(h2o-tile-proxy PROPERTIES COMPILE_FLAGS "-DH2O_TILE -DH2O_TILE_PROXY -DH2O_USE_LIBUV=0")
+IF (WITH_BUNDLED_SSL)
+    PREPEND_INCLUDE_DIRECTORY(h2o-tile-proxy ${BUNDLED_SSL_INCLUDE_DIR})
+    TARGET_LINK_LIBRARIES(h2o-tile-proxy ${BUNDLED_SSL_LIBRARIES})
+    ADD_DEPENDENCIES(h2o-tile-proxy bundled-ssl)
+ELSE (WITH_BUNDLED_SSL)
+    IF (OPENSSL_FOUND)
+        PREPEND_INCLUDE_DIRECTORY(h2o-tile-proxy ${OPENSSL_INCLUDE_DIR})
+        TARGET_LINK_LIBRARIES(h2o-tile-proxy ${OPENSSL_LIBRARIES})
+    ENDIF (OPENSSL_FOUND)
+ENDIF (WITH_BUNDLED_SSL)
+TARGET_LINK_LIBRARIES(h2o-tile-proxy ${EXTRA_LIBRARIES})
+
+#FIND_PACKAGE(mapnik REQUIRED)
+#FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem)
+
+#TARGET_LINK_LIBRARIES(h2o-tile-proxy)
+INSTALL(TARGETS h2o-tile-proxy
     RUNTIME DESTINATION bin
 )
 

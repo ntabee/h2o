@@ -111,7 +111,12 @@ static void on_handler_dispose(h2o_handler_t *_self)
     free(self);
 }
 
+#ifdef H2O_TILE
+struct rp_handler_t *h2o_proxy_register_reverse_proxy(h2o_pathconf_t *pathconf, h2o_url_t *upstream, h2o_proxy_config_vars_t *config)
+#else
+/* Any specific rational not to return the handler? */
 void h2o_proxy_register_reverse_proxy(h2o_pathconf_t *pathconf, h2o_url_t *upstream, h2o_proxy_config_vars_t *config)
+#endif
 {
     struct rp_handler_t *self = (void *)h2o_create_handler(pathconf, sizeof(*self));
     self->super.on_context_init = on_context_init;
@@ -124,4 +129,13 @@ void h2o_proxy_register_reverse_proxy(h2o_pathconf_t *pathconf, h2o_url_t *upstr
         h2o_socketpool_init(self->sockpool, self->upstream.host, h2o_url_get_port(&self->upstream), SIZE_MAX /* FIXME */);
     }
     self->config = *config;
+#ifdef H2O_TILE
+    return self;
+#endif
 }
+
+
+#if H2O_TILE && H2O_TILE_PROXY
+#include "tile-proxy.c"
+#endif
+

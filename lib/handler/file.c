@@ -437,6 +437,6 @@ h2o_mimemap_t *h2o_file_get_mimemap(h2o_file_handler_t *handler)
     return handler->mimemap;
 }
 
-#ifdef H2O_TILE
+#if H2O_TILE && (!H2O_TILE_PROXY)
 #include "tile.c"
 #endif

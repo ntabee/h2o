@@ -213,7 +213,6 @@ static h2o_iovec_t build_request(h2o_req_t *req, int keepalive)
     /* set the length */
     assert(offset <= buf.len);
     buf.len = offset;
-
     return buf;
 }
 

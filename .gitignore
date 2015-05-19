@@ -15,3 +15,11 @@ misc/test-ca/demoCA/newcerts/*.pem
 tmp/
 wrk/paths.txt
 include/git-revision.h
+core
+h2o
+h2o-tile
+h2o-tile-proxy
+yield-tiles
+yield-tile-urls
+libh2o.a
+wrk/results*.txt

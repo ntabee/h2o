@@ -217,7 +217,6 @@ void h2o_reprocess_request(h2o_req_t *req, h2o_iovec_t method, const h2o_url_sch
                            h2o_iovec_t path, h2o_req_overrides_t *overrides, int is_delegated)
 {
     h2o_hostconf_t *hostconf;
-
     /* close generators and filters that are already running */
     close_generator_and_filters(req);
 
@@ -295,7 +294,6 @@ void h2o_send(h2o_req_t *req, h2o_iovec_t *bufs, size_t bufcnt, int is_final)
 
     for (i = 0; i != bufcnt; ++i)
         req->bytes_sent += bufs[i].len;
-
     req->_ostr_top->do_send(req->_ostr_top, req, bufs, bufcnt, is_final);
 }
 

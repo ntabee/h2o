@@ -54,7 +54,7 @@
 #include "h2o/serverutil.h"
 
 /*--------------------*/
-#ifdef H2O_TILE
+#if H2O_TILE && (!H2O_TILE_PROXY)
 #include "mapnik-bridge.h"
 #endif
 /*--------------------*/
@@ -1020,7 +1020,7 @@ static int on_config_num_name_resolution_threads(h2o_configurator_command_t *cmd
 
 
 /*--------------------*/
-#ifdef H2O_TILE
+#if H2O_TILE && (!H2O_TILE_PROXY)
 int mapnik_datasource_initialized = 0;
 static int on_config_mapnik_datasource(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
 {
@@ -1329,7 +1329,7 @@ static void setup_configurators(void)
         h2o_configurator_define_command(c, "num-name-resolution-threads", H2O_CONFIGURATOR_FLAG_GLOBAL,
                                         on_config_num_name_resolution_threads);
 /*--------------------*/
-#ifdef H2O_TILE
+#if H2O_TILE && (!H2O_TILE_PROXY)
         h2o_configurator_define_command(c, "mapnik-datasource", H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR ,
                                         on_config_mapnik_datasource);
         h2o_configurator_define_command(c, "mapnik-fonts", H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR ,
@@ -1467,7 +1467,7 @@ int main(int argc, char **argv)
         yoml_free(yoml);
 
 /*--------------------*/
-#ifdef H2O_TILE
+#if H2O_TILE && (!H2O_TILE_PROXY)
         if (!mapnik_datasource_initialized) {
             /* No "mapnik-datasource" entry in the .conf */
             init_mapnik_datasource(NULL); /* passing NULL is equavalent to the hard-coded default: /usr/local/mapnik/input */

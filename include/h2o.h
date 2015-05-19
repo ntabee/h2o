@@ -961,11 +961,6 @@ int h2o_file_send(h2o_req_t *req, int status, const char *reason, const char *pa
 h2o_file_handler_t *h2o_file_register(h2o_pathconf_t *pathconf, const char *real_path, const char **index_files,
                                       h2o_mimemap_t *mimemap, int flags);
 
-/*--------------------*/
-typedef struct st_h2o_tile_handler_t h2o_tile_handler_t;
-h2o_tile_handler_t *h2o_tile_register(h2o_pathconf_t *pathconf, const char* base_path, const char* style_file_path);
-/*--------------------*/
-
 /**
  * returns the associated mimemap
  */
@@ -974,9 +969,17 @@ h2o_mimemap_t *h2o_file_get_mimemap(h2o_file_handler_t *handler);
  * registers the configurator
  */
 void h2o_file_register_configurator(h2o_globalconf_t *conf);
-/*--------------------*/
+
+#ifdef H2O_TILE
 void h2o_tile_register_configurator(h2o_globalconf_t *conf);
-/*--------------------*/
+ #ifdef H2O_TILE_PROXY
+typedef struct st_h2o_tile_proxy_handler_t h2o_tile_proxy_handler_t;
+h2o_tile_proxy_handler_t *h2o_tile_proxy_register(h2o_pathconf_t *pathconf, const char *base_path, const char *proxy);
+ #else
+typedef struct st_h2o_tile_handler_t h2o_tile_handler_t;
+h2o_tile_handler_t *h2o_tile_register(h2o_pathconf_t *pathconf, const char *base_path, const char* style_file_path);
+ #endif
+#endif
 
 /* lib/headers.c */
 
@@ -1020,7 +1023,12 @@ typedef struct st_h2o_proxy_config_vars_t {
 /**
  * registers the reverse proxy handler to the context
  */
+#ifdef H2O_TILE
+struct rp_handler_t *h2o_proxy_register_reverse_proxy(h2o_pathconf_t *pathconf, h2o_url_t *upstream, h2o_proxy_config_vars_t *config);
+#else
+/* Any specific rational not to return the handler? */
 void h2o_proxy_register_reverse_proxy(h2o_pathconf_t *pathconf, h2o_url_t *upstream, h2o_proxy_config_vars_t *config);
+#endif
 /**
  * registers the configurator
  */
