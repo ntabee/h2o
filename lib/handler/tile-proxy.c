@@ -51,12 +51,14 @@ static void store_chunk(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t *inbuf
     if (is_final) {
         close(fd);
         if (rename(self->tmp_tile_path.base, self->local_tile_path.base) != 0) {
+            h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to rename the tmp file %s to %s: %s\n", self->tmp_tile_path.base, self->local_tile_path.base, strerror(errno));
             h2o_ostream_send_next(&self->super, req, inbufs, inbufcnt, is_final);
             for (i=0; i<32; ++i) {
                 usleep(10);
-                if (rename(self->tmp_tile_path.base, self->local_tile_path.base) != 0) {
+                if (rename(self->tmp_tile_path.base, self->local_tile_path.base) == 0) {
                     return;
                 }
+                h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to rename the tmp file %s to %s: %s\n", self->tmp_tile_path.base, self->local_tile_path.base, strerror(errno));
             }
             return;
         }
