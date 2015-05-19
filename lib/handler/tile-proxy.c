@@ -50,7 +50,16 @@ static void store_chunk(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t *inbuf
 
     if (is_final) {
         close(fd);
-        rename(self->tmp_tile_path.base, self->local_tile_path.base);
+        if (rename(self->tmp_tile_path.base, self->local_tile_path.base) != 0) {
+            h2o_ostream_send_next(&self->super, req, inbufs, inbufcnt, is_final);
+            for (i=0; i<32; ++i) {
+                usleep(10);
+                if (rename(self->tmp_tile_path.base, self->local_tile_path.base) != 0) {
+                    return;
+                }
+            }
+            return;
+        }
     }
 Cont:
     h2o_ostream_send_next(&self->super, req, inbufs, inbufcnt, is_final);
@@ -85,7 +94,7 @@ static void on_setup_ostream(h2o_filter_t *_self, h2o_req_t *req, h2o_ostream_t 
         store_tile = (void *)h2o_add_ostream(req, sizeof(struct st_store_tile_t), slot);
         store_tile->local_tile_path = full_path;
         store_tile->super.do_send = store_chunk;
-        snprintf(thread_id, 18, ".%x", pthread_self());
+        snprintf(thread_id, 22, ".%x.png", pthread_self());
         store_tile->tmp_tile_path = h2o_concat(&req->pool, full_path, h2o_iovec_init(thread_id, strlen(thread_id)));
         mkdir_p_parent(store_tile->tmp_tile_path.base);
         store_tile->fd = open(store_tile->tmp_tile_path.base, O_WRONLY | O_TRUNC | O_CREAT, 0666);
