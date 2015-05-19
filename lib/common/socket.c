@@ -206,6 +206,7 @@ static void flush_pending_ssl(h2o_socket_t *sock, h2o_socket_cb cb)
 static void destroy_ssl(struct st_h2o_socket_ssl_t *ssl)
 {
     SSL_free(ssl->ssl);
+    ssl->ssl = NULL;
     h2o_buffer_dispose(&ssl->input.encrypted);
     h2o_mem_clear_pool(&ssl->output.pool);
     free(ssl);
@@ -216,8 +217,10 @@ static void dispose_socket(h2o_socket_t *sock, int status)
     void (*close_cb)(void *data);
     void *close_cb_data;
 
-    if (sock->ssl != NULL)
+    if (sock->ssl != NULL) {
         destroy_ssl(sock->ssl);
+        sock->ssl = NULL;
+    }
     h2o_buffer_dispose(&sock->input);
 
     close_cb = sock->on_close.cb;
@@ -258,8 +261,10 @@ Close:
 void h2o_socket_dispose_export(h2o_socket_export_t *info)
 {
     assert(info->fd != -1);
-    if (info->ssl != NULL)
+    if (info->ssl != NULL) {
         destroy_ssl(info->ssl);
+        info->ssl = NULL;
+    }
     h2o_buffer_dispose(&info->input);
     close(info->fd);
     info->fd = -1;
@@ -457,9 +462,10 @@ static void proceed_handshake(h2o_socket_t *sock, int status)
         goto Complete;
     }
 
+Redo:
     ret = SSL_accept(sock->ssl->ssl);
 
-    if (ret == 2 || (ret < 0 && SSL_get_error(sock->ssl->ssl, ret) != SSL_ERROR_WANT_READ)) {
+    if (ret == 0 || (ret < 0 && SSL_get_error(sock->ssl->ssl, ret) != SSL_ERROR_WANT_READ)) {
         /* failed */
         status = -1;
         goto Complete;
@@ -472,7 +478,8 @@ static void proceed_handshake(h2o_socket_t *sock, int status)
         if (ret == 1) {
             goto Complete;
         }
-        assert(sock->ssl->input.encrypted->size == 0);
+        if (sock->ssl->input.encrypted->size != 0)
+            goto Redo;
         h2o_socket_read_start(sock, proceed_handshake);
     }
     return;
