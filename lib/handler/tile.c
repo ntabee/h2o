@@ -6,7 +6,6 @@
 #include <strings.h>
 #include "path-mapper.h"
 #include "tile/tile-rewrite-path.h"
-#include "tile/boost-bridge.h"
 #include "tile/mapnik-bridge.h"
 #include "tile/tile-proxy.h"
 
