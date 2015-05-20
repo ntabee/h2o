@@ -181,10 +181,14 @@ static int on_req_tile(struct st_h2o_handler_t *_self, h2o_req_t *req) {
     uint32_t x = 0, y = 0, z = 0;
     char* physical_tile_path = alloca(28);
     char* tile_path = req->path_normalized.base + req->pathconf->path.len; /* is of the form z/x/y.png */
-    if (likely(tile_rewrite_path(tile_path, "", 0, physical_tile_path, 28, &z, &x, &y))) {
-        h2o_iovec_t full_path = h2o_concat(&req->pool, self->local_base_path, h2o_iovec_init(physical_tile_path, strlen(physical_tile_path)));
-        if (likely(access(full_path.base, F_OK) == 0)) {
-            return h2o_file_send(req, 200, "OK", full_path.base, h2o_iovec_init(H2O_STRLIT("image/png")), 0);
+
+    /* only accept GET */
+    if (h2o_memis(req->method.base, req->method.len, H2O_STRLIT("GET"))) {
+        if (likely(tile_rewrite_path(tile_path, "", 0, physical_tile_path, 28, &z, &x, &y))) {
+            h2o_iovec_t full_path = h2o_concat(&req->pool, self->local_base_path, h2o_iovec_init(physical_tile_path, strlen(physical_tile_path)));
+            if (likely(access(full_path.base, F_OK) == 0)) {
+                return h2o_file_send(req, 200, "OK", full_path.base, h2o_iovec_init(H2O_STRLIT("image/png")), 0);
+            }
         }
     }
     return self->on_req_delegate(_self, req);
