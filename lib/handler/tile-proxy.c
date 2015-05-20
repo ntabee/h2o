@@ -35,36 +35,34 @@ static void store_data(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t *inbufs
     struct st_store_tile_t *self = (void *)_self;
     int i;
 
-    int fd;
-    fd = self->fd = open(self->tmp_tile_path.base, O_WRONLY | O_TRUNC | O_CREAT, 0666);
-    if (fd < 0) {
+    if (self->fd < 0) {
+        self->fd = open(self->tmp_tile_path.base, O_WRONLY | O_TRUNC | O_CREAT, 0666);
+    }
+    if (self->fd < 0) {
         h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Could not open file %s: %s\n", self->tmp_tile_path.base, strerror(errno));
         goto Cont;
     }
 
     for (i=0; i != inbufcnt; ++i) {
-        int v = write(fd, inbufs[i].base, inbufs[i].len);
+        int v = write(self->fd, inbufs[i].base, inbufs[i].len);
         if (v != inbufs[i].len) {
             h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to write to file %s: %s\n", self->tmp_tile_path.base, strerror(errno));
-            close(fd);
+            close(self->fd);
             unlink(self->tmp_tile_path.base);
             goto Cont;
         }
     }
 
     if (is_final) {
-        close(fd);
+        close(self->fd);
         if (rename(self->tmp_tile_path.base, self->local_tile_path.base) != 0) {
             h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to rename the tmp file %s to %s: %s\n", self->tmp_tile_path.base, self->local_tile_path.base, strerror(errno));
-            h2o_ostream_send_next(&self->super, req, inbufs, inbufcnt, is_final);
             for (i=0; i<32; ++i) {
                 usleep(10);
                 if (rename(self->tmp_tile_path.base, self->local_tile_path.base) == 0) {
-                    goto Cont;
                 }
                 h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to rename the tmp file %s to %s: %s\n", self->tmp_tile_path.base, self->local_tile_path.base, strerror(errno));
             }
-            return;
         }
     }
 Cont:
@@ -73,12 +71,14 @@ Cont:
 
 static void store_chunked_data(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t *inbufs, size_t inbufcnt, int is_final)
 {
+    static const uint8_t PNG_HEADER[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
     struct st_store_tile_t *self = (void *)_self;
     int i;
 
-    int fd;
-    fd = self->fd = open(self->tmp_tile_path.base, O_WRONLY | O_TRUNC | O_CREAT, 0666);
-    if (fd < 0) {
+    if (self->fd < 0) {
+        self->fd = open(self->tmp_tile_path.base, O_WRONLY | O_TRUNC | O_CREAT, 0666);
+    }
+    if (self->fd < 0) {
         h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Could not open file %s: %s\n", self->tmp_tile_path.base, strerror(errno));
         goto Cont;
     }
@@ -94,7 +94,7 @@ static void store_chunked_data(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t
         switch (phr_decode_chunked(&chunked_decoder, buf, &newsz)) {
         case -1: /* error */
             h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to parse chunks for file %s\n", self->tmp_tile_path.base);
-            close(fd);
+            close(self->fd);
             unlink(self->tmp_tile_path.base);
             goto Cont;
         case -2: /* incomplete */
@@ -105,11 +105,16 @@ static void store_chunked_data(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t
             break;
         }
 
-        write(fd, buf, newsz);
-        close(fd);
+        // Verify buf begins with the PNG header
+        if (likely(memcmp(buf, PNG_HEADER, 8) != 0)) {
+            h2o_req_log_error(req, "lib/handler/tile-proxy.c", "The response is not a correct png\n");
+            close(self->fd);
+            goto Cont;
+        }
+        write(self->fd, buf, newsz);
+        close(self->fd);
         if (rename(self->tmp_tile_path.base, self->local_tile_path.base) != 0) {
             h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to rename the tmp file %s to %s: %s\n", self->tmp_tile_path.base, self->local_tile_path.base, strerror(errno));
-            h2o_ostream_send_next(&self->super, req, inbufs, inbufcnt, is_final);
             /* Is this retrial sane? */
             for (i=0; i<32; ++i) {
                 usleep(10);
@@ -118,7 +123,6 @@ static void store_chunked_data(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t
                 }
                 h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to rename the tmp file %s to %s: %s\n", self->tmp_tile_path.base, self->local_tile_path.base, strerror(errno));
             }
-            return;
         }
     }
 
@@ -154,6 +158,7 @@ static void on_setup_ostream(h2o_filter_t *_self, h2o_req_t *req, h2o_ostream_t 
         ++physical_tile_path;
         h2o_iovec_t full_path = h2o_concat(&req->pool, self->local_base_path, h2o_iovec_init(physical_tile_path, strlen(physical_tile_path)));
         store_tile = (void *)h2o_add_ostream(req, sizeof(struct st_store_tile_t), slot);
+        store_tile->fd = -1;
         store_tile->local_tile_path = full_path;
         store_tile->super.do_send = store_data;
         if ((txfer_enc_idx = h2o_find_header(&(req->res.headers), H2O_TOKEN_TRANSFER_ENCODING, SIZE_MAX)) != -1) {
