@@ -215,10 +215,3 @@ h2o_tile_proxy_handler_t *h2o_tile_proxy_register(h2o_pathconf_t *pathconf, cons
 
     return self;
 }
-
-// h2o_tile_proxy_handler_t *h2o_tile_register(h2o_pathconf_t *pathconf, const char* base_path, const char *upstream)
-// {
-//     h2o_tile_proxy_register(pathconf, base_path, upstream);
-
-//     return self;
-// }
