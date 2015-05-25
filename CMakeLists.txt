@@ -1,3 +1,23 @@
+# Copyright (c) 2014,2015 DeNA Co., Ltd., Kazuho Oku, Brian Stanback, Laurentiu Nicola
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 CMAKE_POLICY(SET CMP0003 NEW)
 
@@ -160,6 +180,7 @@ SET(UNIT_TEST_SOURCE_FILES
     t/00unit/lib/common/hostinfo.c
     t/00unit/lib/common/multithread.c
     t/00unit/lib/common/serverutil.c
+    t/00unit/lib/common/socket.c
     t/00unit/lib/common/string.c
     t/00unit/lib/common/time.c
     t/00unit/lib/common/url.c
@@ -176,6 +197,7 @@ LIST(REMOVE_ITEM UNIT_TEST_SOURCE_FILES
     lib/common/hostinfo.c
     lib/common/multithread.c
     lib/common/serverutil.c
+    lib/common/socket.c
     lib/common/string.c
     lib/common/time.c
     lib/common/url.c
@@ -191,9 +213,14 @@ LIST(REMOVE_ITEM UNIT_TEST_SOURCE_FILES
 SET(EXTRA_LIBRARIES ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
 ADD_LIBRARY(libh2o ${LIB_SOURCE_FILES})
+ADD_LIBRARY(libh2o-evloop ${LIB_SOURCE_FILES})
 SET_TARGET_PROPERTIES(libh2o PROPERTIES OUTPUT_NAME h2o)
+SET_TARGET_PROPERTIES(libh2o-evloop PROPERTIES
+    OUTPUT_NAME h2o-evloop
+    COMPILE_FLAGS "-DH2O_USE_LIBUV=0")
 IF (OPENSSL_FOUND)
     PREPEND_INCLUDE_DIRECTORY(libh2o ${OPENSSL_INCLUDE_DIR})
+    PREPEND_INCLUDE_DIRECTORY(libh2o-evloop ${OPENSSL_INCLUDE_DIR})
 ENDIF (OPENSSL_FOUND)
 
 ADD_CUSTOM_TARGET(lib-examples DEPENDS examples-http1client examples-simple examples-socket-client)
@@ -259,15 +286,16 @@ INSTALL(TARGETS h2o
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib)
 
+INSTALL(DIRECTORY include/ DESTINATION include FILES_MATCHING PATTERN "*.h")
+INSTALL(TARGETS libh2o-evloop DESTINATION lib)
 # only install libh2o if libuv is found
 IF (LIBUV_FOUND)
   INSTALL(TARGETS libh2o DESTINATION lib)
-  INSTALL(DIRECTORY include/ DESTINATION include FILES_MATCHING PATTERN "*.h")
 ELSE (LIBUV_FOUND)
   SET_TARGET_PROPERTIES(libh2o PROPERTIES EXCLUDE_FROM_ALL 1)
 ENDIF (LIBUV_FOUND)
 
-INSTALL(PROGRAMS share/h2o/fetch-ocsp-response share/h2o/start_server DESTINATION share/h2o)
+INSTALL(PROGRAMS share/h2o/annotate-backtrace-symbols share/h2o/fetch-ocsp-response share/h2o/start_server DESTINATION share/h2o)
 INSTALL(DIRECTORY doc/ DESTINATION share/doc/h2o PATTERN "Makefile" EXCLUDE PATTERN "README.md" EXCLUDE)
 
 # tests

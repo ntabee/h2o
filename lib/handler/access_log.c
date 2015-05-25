@@ -29,6 +29,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include "h2o.h"
+#include "h2o/serverutil.h"
 
 #define LOG_ALLOCA_SIZE 4096
 
@@ -409,23 +410,24 @@ int h2o_access_log_open_log(const char *path)
 
     if (path[0] == '|') {
         int pipefds[2];
-        posix_spawn_file_actions_t file_actions;
         pid_t pid;
         char* argv[4] = {"/bin/sh", "-c", (char *)(path + 1), NULL};
-        extern char **environ;
          /* create pipe */
         if (pipe(pipefds) != 0) {
             perror("pipe failed");
             return -1;
         }
-        if (fcntl(pipefds[1], FD_CLOEXEC, 1) == -1) {
+        if (fcntl(pipefds[1], F_SETFD, FD_CLOEXEC) == -1) {
             perror("failed to set FD_CLOEXEC on pipefds[1]");
             return -1;
         }
         /* spawn the logger */
-        posix_spawn_file_actions_init(&file_actions);
-        posix_spawn_file_actions_adddup2(&file_actions, pipefds[0], 0);
-        if ((errno = posix_spawnp(&pid, argv[0], &file_actions, NULL, argv, environ)) != 0) {
+        int mapped_fds[] = {
+            pipefds[0], 0, /* map pipefds[0] to stdin */
+            pipefds[0], -1, /* close pipefds[0] before exec */
+            -1
+        };
+        if ((pid = h2o_spawnp(argv[0], argv, mapped_fds)) == -1) {
             fprintf(stderr, "failed to open logger: %s:%s\n", path + 1, strerror(errno));
             return -1;
         }

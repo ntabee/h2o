@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 DeNA Co., Ltd.
+ * Copyright (c) 2015 DeNA Co., Ltd., Kazuho Oku, Justin Zhu
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -203,12 +203,18 @@ static void flush_pending_ssl(h2o_socket_t *sock, h2o_socket_cb cb)
     do_write(sock, sock->ssl->output.bufs.entries, sock->ssl->output.bufs.size, cb);
 }
 
+static void clear_output_buffer(struct st_h2o_socket_ssl_t *ssl)
+{
+    memset(&ssl->output.bufs, 0, sizeof(ssl->output.bufs));
+    h2o_mem_clear_pool(&ssl->output.pool);
+}
+
 static void destroy_ssl(struct st_h2o_socket_ssl_t *ssl)
 {
     SSL_free(ssl->ssl);
     ssl->ssl = NULL;
     h2o_buffer_dispose(&ssl->input.encrypted);
-    h2o_mem_clear_pool(&ssl->output.pool);
+    clear_output_buffer(ssl);
     free(ssl);
 }
 
@@ -347,18 +353,15 @@ void h2o_socket_write(h2o_socket_t *sock, h2o_iovec_t *bufs, size_t bufcnt, h2o_
                     sz = 1400;
                 ret = SSL_write(sock->ssl->ssl, bufs[0].base + off, (int)sz);
                 if (ret != sz) {
-                    fprintf(stderr, "SSL_write(3) failed; IN %d, OUT %d\n", (int)sz, ret);
-                    if (ret < 0) {
-                        int sslerr = SSL_get_error(sock->ssl->ssl, ret);
-                        fprintf(stderr, "result of SSL_get_error is %d\n", sslerr);
-                        if (sslerr == SSL_ERROR_SSL)
-                            ERR_print_errors_fp(stderr);
-                    }
-                    memset(&sock->ssl->output.bufs, 0, sizeof(sock->ssl->output.bufs));
-                    h2o_mem_clear_pool(&sock->ssl->output.pool);
+                    /* The error happens if SSL_write is called after SSL_read returns a fatal error (e.g. due to corrupt TCP packet
+                     * being received). We need to take care of this since some protocol implementations send data after the read-
+                     * side of the connection gets closed (note that protocol implementations are (yet) incapable of distinguishing
+                     * a normal shutdown and close due to an error using the `status` value of the read callback).
+                     */
+                    clear_output_buffer(sock->ssl);
                     flush_pending_ssl(sock, cb);
 #ifndef H2O_USE_LIBUV
-                    ((struct st_h2o_evloop_socket_t*)sock)->_flags |= H2O_SOCKET_FLAG_IS_WRITE_ERROR;
+                    ((struct st_h2o_evloop_socket_t *)sock)->_flags |= H2O_SOCKET_FLAG_IS_WRITE_ERROR;
 #endif
                     return;
                 }
@@ -373,10 +376,8 @@ void on_write_complete(h2o_socket_t *sock, int status)
 {
     h2o_socket_cb cb;
 
-    if (sock->ssl != NULL) {
-        memset(&sock->ssl->output.bufs, 0, sizeof(sock->ssl->output.bufs));
-        h2o_mem_clear_pool(&sock->ssl->output.pool);
-    }
+    if (sock->ssl != NULL)
+        clear_output_buffer(sock->ssl);
 
     cb = sock->_cb.write;
     sock->_cb.write = NULL;
@@ -529,27 +530,25 @@ h2o_iovec_t h2o_socket_ssl_get_selected_protocol(h2o_socket_t *sock)
     return h2o_iovec_init(data, len);
 }
 
-#if H2O_USE_ALPN
-
-static int on_alpn_select(SSL *ssl, const unsigned char **out, unsigned char *outlen, const unsigned char *in, unsigned int inlen,
+static int on_alpn_select(SSL *ssl, const unsigned char **out, unsigned char *outlen, const unsigned char *_in, unsigned int inlen,
                           void *_protocols)
 {
     const h2o_iovec_t *protocols = _protocols;
-    const unsigned char *in_end = in + inlen;
     size_t i;
 
-    while (in != in_end) {
-        size_t cand_len = *in++;
-        if (in_end - in < cand_len) {
-            /* broken request */
-            break;
-        }
-        for (i = 0; protocols[i].len != 0; ++i) {
+    for (i = 0; protocols[i].len !=0; ++i) {
+        const unsigned char *in = _in, *in_end = in + inlen;
+        while (in != in_end) {
+            size_t cand_len = *in++;
+            if (in_end - in < cand_len) {
+                /* broken request */
+                return SSL_TLSEXT_ERR_NOACK;
+            }
             if (cand_len == protocols[i].len && memcmp(in, protocols[i].base, cand_len) == 0) {
                 goto Found;
             }
+            in += cand_len;
         }
-        in += cand_len;
     }
     /* not found */
     return SSL_TLSEXT_ERR_NOACK;
@@ -559,6 +558,8 @@ Found:
     *outlen = (unsigned char)protocols[i].len;
     return SSL_TLSEXT_ERR_OK;
 }
+
+#if H2O_USE_ALPN
 
 void h2o_ssl_register_alpn_protocols(SSL_CTX *ctx, const h2o_iovec_t *protocols)
 {
