@@ -349,7 +349,10 @@ ENDIF (APPLE)
 # h2o-tile server
 ADD_CUSTOM_COMMAND(OUTPUT include/git-revision.h DEPENDS .git/HEAD .git/index COMMAND /bin/sh gen-git-revision.sh > $@)
 
-INCLUDE_DIRECTORIES(tile)
+INCLUDE_DIRECTORIES(
+    tile
+    include/tile
+)
 
 SET(TILE_SOURCE_FILES
     ${LIB_SOURCE_FILES}
@@ -391,7 +394,10 @@ INSTALL(TARGETS h2o-tile
 # h2o-tile proxy
 ADD_CUSTOM_COMMAND(OUTPUT include/git-revision.h DEPENDS .git/HEAD .git/index COMMAND /bin/sh gen-git-revision.sh > $@)
 
-INCLUDE_DIRECTORIES(tile)
+INCLUDE_DIRECTORIES(
+    tile
+    include/tile
+)
 
 SET(TILE_SOURCE_FILES
     ${LIB_SOURCE_FILES}
@@ -460,6 +466,29 @@ TARGET_LINK_LIBRARIES(yield-tiles ${Boost_LIBRARIES} ${MAPNIK_LIBRARIES} ${ICU_L
 INSTALL(TARGETS yield-tiles
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib)
+
+#   expire-tiles
+PROJECT(expire-tiles CXX)
+
+INCLUDE_DIRECTORIES(
+    tile
+)
+SET(EXPIRE_TILES_SOURCE_FILES
+    include/git-revision.h
+    tile/proj.hpp
+    tile/expire_tiles.cpp
+)
+ADD_EXECUTABLE(expire-tiles
+    ${EXPIRE_TILES_SOURCE_FILES})
+SET_TARGET_PROPERTIES(expire-tiles PROPERTIES COMPILE_FLAGS "-std=c++11")
+FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem thread program_options regex timer)
+INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(expire-tiles ${Boost_LIBRARIES} )
+
+INSTALL(TARGETS expire-tiles
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib)
+
 
 #   yield-tile-urls
 PROJECT(yield-tile-urls CXX)
