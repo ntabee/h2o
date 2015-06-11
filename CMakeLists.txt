@@ -471,28 +471,6 @@ INSTALL(TARGETS yield-tiles
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib)
 
-#   expire-tiles
-PROJECT(expire-tiles CXX)
-
-INCLUDE_DIRECTORIES(
-    tile
-)
-SET(EXPIRE_TILES_SOURCE_FILES
-    include/git-revision.h
-    tile/proj.hpp
-    tile/expire_tiles.cpp
-)
-ADD_EXECUTABLE(expire-tiles
-    ${EXPIRE_TILES_SOURCE_FILES})
-SET_TARGET_PROPERTIES(expire-tiles PROPERTIES COMPILE_FLAGS "-std=c++11")
-FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem thread program_options regex timer)
-INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
-TARGET_LINK_LIBRARIES(expire-tiles ${Boost_LIBRARIES} )
-
-INSTALL(TARGETS expire-tiles
-    RUNTIME DESTINATION bin
-    LIBRARY DESTINATION lib)
-
 
 #   yield-tile-urls
 PROJECT(yield-tile-urls CXX)
