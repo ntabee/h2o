@@ -57,6 +57,10 @@ static int h2o_tolower(int ch);
  */
 static void h2o_strtolower(char *s, size_t len);
 /**
+ * tr/a-z/A-Z/
+ */
+static int h2o_toupper(int ch);
+/**
  * tests if target string (target_len bytes long) is equal to test string (test_len bytes long) after being converted to lower-case
  */
 static int h2o_lcstris(const char *target, size_t target_len, const char *test, size_t test_len);
@@ -65,8 +69,13 @@ static int h2o_lcstris(const char *target, size_t target_len, const char *test, 
  */
 size_t h2o_strtosize(const char *s, size_t len);
 /**
- * base64 url decoder
+ * parses first positive number contained in *s or return SIZE_MAX if failed.
+ * *s will set to right after the number in string or right after the end of string.
  */
+size_t h2o_strtosizefwd(char **s, size_t len);
+/**
+* base64 url decoder
+*/
 h2o_iovec_t h2o_decode_base64url(h2o_mem_pool_t *pool, const char *src, size_t len);
 /**
  * base64 encoder
@@ -120,6 +129,11 @@ inline void h2o_strtolower(char *s, size_t len)
 {
     for (; len != 0; ++s, --len)
         *s = h2o_tolower(*s);
+}
+
+inline int h2o_toupper(int ch)
+{
+    return 'a' <= ch && ch <= 'z' ? ch - 0x20 : ch;
 }
 
 inline int h2o_lcstris(const char *target, size_t target_len, const char *test, size_t test_len)

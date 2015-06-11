@@ -66,6 +66,11 @@
 /* simply use a large value, and let the kernel clip it to the internal max */
 #define H2O_SOMAXCONN (65535)
 
+#ifdef TCP_FASTOPEN
+#define H2O_DEFAULT_LENGTH_TCP_FASTOPEN_QUEUE 4096
+#else
+#define H2O_DEFAULT_LENGTH_TCP_FASTOPEN_QUEUE 0
+#endif
 #define H2O_DEFAULT_NUM_NAME_RESOLUTION_THREADS 32
 
 struct listener_ssl_config_t {
@@ -123,6 +128,7 @@ static struct {
     char *error_log;
     int max_connections;
     size_t num_threads;
+    int tfo_queues;
     struct {
         pthread_t tid;
         h2o_context_t ctx;
@@ -145,6 +151,7 @@ static struct {
     NULL, /* pid_file */
     NULL, /* error_log */
     1024, /* max_connections */
+    0,    /* initialized in main() */
     0,    /* initialized in main() */
     NULL, /* thread_ids */
     0,    /* shutdown_requested */
@@ -761,6 +768,17 @@ static int open_tcp_listener(h2o_configurator_command_t *cmd, yoml_t *node, cons
             goto Error;
     }
 #endif
+    /* set TCP_FASTOPEN; when tfo_queues is zero TFO is always disabled */
+    if (conf.tfo_queues > 0) {
+#ifdef TCP_FASTOPEN
+        if (setsockopt(fd, IPPROTO_TCP, TCP_FASTOPEN, (const void *)&conf.tfo_queues, sizeof(conf.tfo_queues)) != 0) {
+            fprintf(stderr, "failed to set TCP_FASTOPEN:%s\n", strerror(errno));
+            goto Error;
+        }
+#else
+        assert(!"conf.tfo_queues not zero on platform without TCP_FASTOPEN");
+#endif
+    }
     if (bind(fd, addr, addrlen) != 0)
         goto Error;
     if (listen(fd, H2O_SOMAXCONN) != 0)
@@ -1022,7 +1040,6 @@ static int on_config_num_name_resolution_threads(h2o_configurator_command_t *cmd
     return 0;
 }
 
-
 /*--------------------*/
 #if H2O_TILE && (!H2O_TILE_PROXY)
 int mapnik_datasource_initialized = 0;
@@ -1041,6 +1058,19 @@ static int on_config_mapnik_fonts(h2o_configurator_command_t *cmd, h2o_configura
 
 #endif
 /*--------------------*/
+
+static int on_config_tcp_fastopen(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
+{
+    if (h2o_configurator_scanf(cmd, node, "%d", &conf.tfo_queues) != 0)
+        return -1;
+#ifndef TCP_FASTOPEN
+    if (conf.tfo_queues != 0) {
+        h2o_configurator_errprintf(cmd, node, "[warning] ignoring the value; the platform does not support TCP_FASTOPEN");
+        conf.tfo_queues = 0;
+    }
+#endif
+    return 0;
+}
 
 yoml_t *load_config(const char *fn)
 {
@@ -1400,6 +1430,7 @@ static void setup_configurators(void)
                                         on_config_mapnik_fonts);
 #endif
 /*--------------------*/
+        h2o_configurator_define_command(c, "tcp-fastopen", H2O_CONFIGURATOR_FLAG_GLOBAL, on_config_tcp_fastopen);
     }
 
     h2o_access_log_register_configurator(&conf.globalconf);
@@ -1409,6 +1440,7 @@ static void setup_configurators(void)
     h2o_tile_register_configurator(&conf.globalconf);
 #endif
 /*--------------------*/
+    h2o_fastcgi_register_configurator(&conf.globalconf);
     h2o_file_register_configurator(&conf.globalconf);
     h2o_headers_register_configurator(&conf.globalconf);
     h2o_proxy_register_configurator(&conf.globalconf);
@@ -1423,6 +1455,7 @@ int main(int argc, char **argv)
     int error_log_fd = -1;
 
     conf.num_threads = h2o_numproc();
+    conf.tfo_queues = H2O_DEFAULT_LENGTH_TCP_FASTOPEN_QUEUE;
     h2o_hostinfo_max_threads = H2O_DEFAULT_NUM_NAME_RESOLUTION_THREADS;
     setup_configurators();
 

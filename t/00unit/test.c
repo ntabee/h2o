@@ -27,9 +27,9 @@ static void loopback_on_send(h2o_ostream_t *self, h2o_req_t *req, h2o_iovec_t *i
     size_t i;
 
     for (i = 0; i != inbufcnt; ++i) {
-        h2o_buffer_reserve(&conn->body, inbufs->len);
-        memcpy(conn->body->bytes + conn->body->size, inbufs->base, inbufs->len);
-        conn->body->size += inbufs->len;
+        h2o_buffer_reserve(&conn->body, inbufs[i].len);
+        memcpy(conn->body->bytes + conn->body->size, inbufs[i].base, inbufs[i].len);
+        conn->body->size += inbufs[i].len;
     }
 
     if (is_final)
@@ -148,6 +148,7 @@ int main(int argc, char **argv)
 #endif
 
         subtest("lib/t/test.c/loopback", test_loopback);
+        subtest("lib/fastcgi.c", test_lib__handler__fastcgi_c);
         subtest("lib/file.c", test_lib__handler__file_c);
         subtest("lib/redirect.c", test_lib__handler__redirect_c);
         subtest("issues/293.c", test_issues293);
