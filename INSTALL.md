@@ -105,8 +105,8 @@ Example:
 
 - `mapnik-datasource`: specifies the directory where Mapnik's datasource plugins are located.
     + Level: global. There **must** be **exaxtly one** `mapnik-datasource` at the global level.
-    The value is typically `/usr/lib/mapnik` or `/usr/local/lib/mapnik`; a valid datasource directory
-    should contain a directory named `input`, under which several shared libraries suffixed as `.input` are placed:
+    The value is typically `/usr/lib/mapnik/input` or `/usr/local/lib/mapnik/input`; a valid datasource directory
+    is typically named `input` and contains several shared libraries suffixed as `.input`:
 
 Example:
 
