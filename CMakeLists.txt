@@ -524,6 +524,28 @@ INSTALL(TARGETS yield-tile-urls
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib)
 
+#   yield-tile-urls
+PROJECT(expire-tiles CXX)
+FIND_PACKAGE(Boost 1.52.0 REQUIRED COMPONENTS system filesystem thread timer program_options regex)
+
+INCLUDE_DIRECTORIES(
+    tile
+)
+SET(EXPIRE_TILES_SOURCE_FILES
+    include/git-revision.h
+    tile/proj.hpp
+    tile/expire_tiles.cpp
+)
+ADD_EXECUTABLE(expire-tiles
+    ${EXPIRE_TILES_SOURCE_FILES})
+SET_TARGET_PROPERTIES(expire-tiles PROPERTIES COMPILE_FLAGS "-std=c++11")
+INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(expire-tiles ${Boost_LIBRARIES})
+
+INSTALL(TARGETS yield-tile-urls
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib)
+
 
 IF ("${CMAKE_SYSTEM_NAME}" MATCHES "SunOS")
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_POSIX_PTHREAD_SEMANTICS")

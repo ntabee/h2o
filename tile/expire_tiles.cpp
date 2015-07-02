@@ -171,7 +171,7 @@ removes tiles listed in expire-list-file under base-path.
 Options:
     -p,--prefix base-path: a valid directory name, into which tiles are rendered
     -f,--file expire-list-file: the list of tiles to expire: 
-                                a tile list consists of lines of the form slash-delimited triple of integers
+                                a tile list consists of lines, each of which is slash-delimited triple of integers
                                     z/x/y
                                 each line denotes the logical path of a tile, without suffix.
                                 Example:
@@ -215,7 +215,7 @@ int main(int ac, char** av) {
                 "  + defaults to boost::thread::hardware_concurrency()") 
             ("dry-run,d", 
                 "Only estimates the number of tiles, does not actually render\n") 
-        ;   // add_options();
+        ;
         if (ac <= 1) {
             // No options are given.
             // Just print the usage w.o. error messages.
@@ -252,6 +252,10 @@ int main(int ac, char** av) {
 
             po::notify(vm); // throws on error, so do after help in case 
                             // there are any problems 
+            if ( !vm.count("expire-list-file") || list_file == "(stdin)") {
+                list_file = "-";
+            }
+ 
         } catch(po::required_option& e) { 
             std::cerr << desc << std::endl;
             std::cerr << "ERROR: " << e.what() << std::endl << std::endl; 
@@ -271,7 +275,7 @@ int main(int ac, char** av) {
 
         // Open the list file
         std::istream* in;
-        if (base == "-") {
+        if (list_file == "-") {
             in = &std::cin;
         } else {
             try {
@@ -299,6 +303,7 @@ int main(int ac, char** av) {
             std::string line;
             uint64_t lineno = 0;
             uint32_t z, x, y;
+            std::getline(*in, line);
             while (std::getline(*in, line)) {
                 ++lineno;
                 std::vector<std::string> tokens;

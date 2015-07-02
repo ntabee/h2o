@@ -9,6 +9,7 @@
 /usr/local/include/h2o/http2_scheduler.h
 /usr/local/include/h2o/linklist.h
 /usr/local/include/h2o/memory.h
+/usr/local/include/h2o/mruby.h
 /usr/local/include/h2o/multithread.h
 /usr/local/include/h2o/serverutil.h
 /usr/local/include/h2o/socket/evloop.h
@@ -32,7 +33,9 @@
 /usr/local/lib/libh2o.a
 /usr/local/share/h2o/annotate-backtrace-symbols
 /usr/local/share/h2o/fetch-ocsp-response
+/usr/local/share/h2o/kill-on-close
 /usr/local/share/h2o/start_server
+/usr/local/share/doc/h2o/assets/firstpaintbench.png
 /usr/local/share/doc/h2o/assets/remotebench.png
 /usr/local/share/doc/h2o/assets/searchstyle.css
 /usr/local/share/doc/h2o/assets/style.css
@@ -40,6 +43,7 @@
 /usr/local/share/doc/h2o/configure/base_directives.html
 /usr/local/share/doc/h2o/configure/command_options.html
 /usr/local/share/doc/h2o/configure/expires_directives.html
+/usr/local/share/doc/h2o/configure/fastcgi_directives.html
 /usr/local/share/doc/h2o/configure/file_directives.html
 /usr/local/share/doc/h2o/configure/headers_directives.html
 /usr/local/share/doc/h2o/configure/http1_directives.html
@@ -61,5 +65,5 @@
 /usr/local/bin/h2o-tile
 /usr/local/bin/h2o-tile-proxy
 /usr/local/bin/yield-tiles
-/usr/local/bin/expire-tiles
+/usr/local/bin/yield-tile-urls
 /usr/local/bin/yield-tile-urls
