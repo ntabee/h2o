@@ -68,7 +68,7 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
 {
     h2o_tile_handler_t *self = (void *)_self;
     h2o_file_handler_t *super = &(self->super);
-    h2o_iovec_t mime_type;
+    h2o_mimemap_type_t *mime_type;
     char *rpath;
     size_t rpath_len, req_path_prefix;
     struct st_h2o_sendfile_generator_t *generator = NULL;
@@ -116,11 +116,21 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
             /* failed to open */
             if (errno == ENOENT) {
                  /* If create_generator() failed (i.e. tile_path is non-existent), invoke renderer */
-                mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
 #ifdef H2O_TILE_PROXY
                 assert(!"unreachable");
 #else
-                render_tile(req, self->map, rpath, z, x, y, mime_type.base, mime_type.len, super->flags, on_tile_rendered);               
+                /* 
+                This function is already a "custom handler", associating yet another to ".png" files
+                would be highly probably a misconfiguration.
+                */
+                mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
+                switch (mime_type->type) {
+                case H2O_MIMEMAP_TYPE_MIMETYPE:
+                    render_tile(req, self->map, rpath, z, x, y, mime_type->data.mimetype.base, mime_type->data.mimetype.len, super->flags, on_tile_rendered);
+                    break;
+                case H2O_MIMEMAP_TYPE_DYNAMIC:
+                    h2o_send_error(req, 500, "Internal Server Error", "MIME type for .png is declared as 'dynamic.'", 0);
+                }
 #endif
             } else {
                 h2o_send_error(req, 403, "Access Forbidden", "access forbidden", 0);
@@ -149,8 +159,14 @@ Opened:
     mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
 
     /* return file */
-    do_send_file(generator, req, 200, "OK", mime_type, is_get);
-    return 0;
+    switch (mime_type->type) {
+    case H2O_MIMEMAP_TYPE_MIMETYPE:
+        do_send_file(generator, req, 200, "OK", mime_type->data.mimetype, is_get);
+        return 0;
+    case H2O_MIMEMAP_TYPE_DYNAMIC:
+        h2o_send_error(req, 500, "Internal Server Error", "MIME type for .png is declared as 'dynamic.'", 0);
+        return 0;
+    }    
 
 NotModified:
     req->res.status = 304;
