@@ -189,6 +189,16 @@ Options:
     -v,--version
     -h,--help
 */
+
+template <typename T>
+static inline bool try_lexical_convert(const std::string& tk, T& r) {
+    try {
+        r = boost::lexical_cast<T>(tk);
+        return true;
+    } catch (boost::bad_lexical_cast& e) {
+        return false;
+    }
+}
 int main(int ac, char** av) {
     try { 
         std::string base;
@@ -303,16 +313,16 @@ int main(int ac, char** av) {
             std::string line;
             uint64_t lineno = 0;
             uint32_t z, x, y;
-            std::getline(*in, line);
             while (std::getline(*in, line)) {
                 ++lineno;
                 std::vector<std::string> tokens;
                 boost::split(tokens, line, boost::is_from_range('/','/'));
                 if (tokens.size() != 3 ||
-                    !boost::conversion::try_lexical_convert<uint32_t>(tokens[0], z) ||
-                    !boost::conversion::try_lexical_convert<uint32_t>(tokens[1], x) ||
-                    !boost::conversion::try_lexical_convert<uint32_t>(tokens[2], y) ) {
+                    !try_lexical_convert<uint32_t>(tokens[0], z) ||
+                    !try_lexical_convert<uint32_t>(tokens[1], x) ||
+                    !try_lexical_convert<uint32_t>(tokens[2], y) ) {
                     std::cerr << "WARN: skipped illfomed line: " << line << " (line at " << lineno << ")" << std::endl;
+                    continue;
                 }
                 uint64_t tile_id = pack(z, x, y);
                 while (!queue.push(tile_id)) {}
