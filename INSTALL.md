@@ -77,7 +77,7 @@ My particular recommendation is [Btrfs](https://btrfs.wiki.kernel.org/index.php/
 Mounting a btrfs partition (to `/opt`), in a simplest form, is:
 
 ```bash
-$ sudo sudo apt-get install btrfs-tools
+$ sudo apt-get install btrfs-tools
 $ sudo mkfs.btrfs -O^extref -m single /dev/your/partition/for/tiles
 $ sudo vi /etc/fstab # and add the following line
 /dev/part/for/tiles  /opt       btrfs   auto,noexec,noatime,autodefrag,space_cache      0       2
