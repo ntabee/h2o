@@ -28,11 +28,6 @@ static int on_config_dir(h2o_configurator_command_t *cmd, h2o_configurator_conte
         return -1;
     }
     self->vars->base_path = node->data.scalar;
-#if H2O_TILE && (!H2O_TILE_PROXY)
-    h2o_tile_register(ctx->pathconf, self->vars->base_path, self->vars->style_file_path);
-#else
-    h2o_tile_proxy_register(ctx->pathconf, self->vars->base_path, self->vars->upstream);
-#endif
     return 0;
 }
 
@@ -69,19 +64,28 @@ static int on_config_upstream(h2o_configurator_command_t *cmd, h2o_configurator_
 static int on_config_enter(h2o_configurator_t *_self, h2o_configurator_context_t *ctx, yoml_t *node)
 {
     struct st_h2o_tile_configurator_t *self = (void *)_self;
+    ++self->vars;
     self->vars[0].base_path = NULL;
 #if H2O_TILE && (!H2O_TILE_PROXY)
     self->vars[0].style_file_path = NULL;
 #else
     self->vars[0].upstream = NULL;
 #endif
-    ++self->vars;
     return 0;
 }
 
 static int on_config_exit(h2o_configurator_t *_self, h2o_configurator_context_t *ctx, yoml_t *node)
 {
     struct st_h2o_tile_configurator_t *self = (void *)_self;
+#if H2O_TILE && (!H2O_TILE_PROXY)
+    if (self->vars->base_path && self->vars->style_file_path) {
+        h2o_tile_register(ctx->pathconf, self->vars->base_path, self->vars->style_file_path);
+    }
+#else
+    if (self->vars->base_path && self->vars->upstream) {
+        h2o_tile_proxy_register(ctx->pathconf, self->vars->base_path, self->vars->upstream);
+    }
+#endif
     --self->vars;
     return 0;
 }
@@ -94,7 +98,7 @@ void h2o_tile_register_configurator(h2o_globalconf_t *globalconf)
     self->vars = self->_vars_stack;
     self->vars->base_path = NULL;
 #if H2O_TILE && (!H2O_TILE_PROXY)
-    self->vars[0].style_file_path = NULL;
+    self->vars->style_file_path = NULL;
 #else
     self->vars->upstream = NULL;
 #endif
