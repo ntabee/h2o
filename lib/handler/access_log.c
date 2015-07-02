@@ -270,10 +270,12 @@ static void log_access(h2o_logger_t *_self, h2o_req_t *req)
             RESERVE(sizeof("HTTP/1.1"));
             pos += h2o_stringify_protocol_version(pos, req->version);
             break;
-        case ELEMENT_TYPE_REMOTE_ADDR: /* %h */
-            if (req->conn->peername.addr != NULL) {
+        case ELEMENT_TYPE_REMOTE_ADDR: /* %h */ {
+            struct sockaddr_storage ss;
+            socklen_t sslen;
+            if ((sslen = req->conn->get_peername(req->conn, (void *)&ss)) != 0) {
                 RESERVE(NI_MAXHOST);
-                size_t l = h2o_socket_getnumerichost(req->conn->peername.addr, req->conn->peername.len, pos);
+                size_t l = h2o_socket_getnumerichost((void *)&ss, sslen, pos);
                 if (l != SIZE_MAX)
                     pos += l;
                 else
@@ -282,7 +284,7 @@ static void log_access(h2o_logger_t *_self, h2o_req_t *req)
                 RESERVE(1);
                 *pos++ = '-';
             }
-            break;
+        } break;
         case ELEMENT_TYPE_METHOD: /* %m */
             RESERVE(req->input.method.len * 4);
             pos = append_unsafe_string(pos, req->input.method.base, req->input.method.len);
@@ -326,9 +328,8 @@ static void log_access(h2o_logger_t *_self, h2o_req_t *req)
             pos = append_unsafe_string(pos, req->input.authority.base, req->input.authority.len);
             break;
         case ELEMENT_TYPE_HOSTCONF: /* %v */
-            RESERVE(req->pathconf->host->authority.hostport.len * 4);
-            pos = append_unsafe_string(pos, req->pathconf->host->authority.hostport.base,
-                                       req->pathconf->host->authority.hostport.len);
+            RESERVE(req->hostconf->authority.hostport.len * 4);
+            pos = append_unsafe_string(pos, req->hostconf->authority.hostport.base, req->hostconf->authority.hostport.len);
             break;
 
         case ELEMENT_TYPE_LOGNAME:     /* %l */
@@ -399,8 +400,8 @@ int h2o_access_log_open_log(const char *path)
     if (path[0] == '|') {
         int pipefds[2];
         pid_t pid;
-        char* argv[4] = {"/bin/sh", "-c", (char *)(path + 1), NULL};
-         /* create pipe */
+        char *argv[4] = {"/bin/sh", "-c", (char *)(path + 1), NULL};
+        /* create pipe */
         if (pipe(pipefds) != 0) {
             perror("pipe failed");
             return -1;
@@ -410,12 +411,10 @@ int h2o_access_log_open_log(const char *path)
             return -1;
         }
         /* spawn the logger */
-        int mapped_fds[] = {
-            pipefds[0], 0, /* map pipefds[0] to stdin */
-            pipefds[0], -1, /* close pipefds[0] before exec */
-            -1
-        };
-        if ((pid = h2o_spawnp(argv[0], argv, mapped_fds)) == -1) {
+        int mapped_fds[] = {pipefds[0], 0,  /* map pipefds[0] to stdin */
+                            pipefds[0], -1, /* close pipefds[0] before exec */
+                            -1};
+        if ((pid = h2o_spawnp(argv[0], argv, mapped_fds, 0)) == -1) {
             fprintf(stderr, "failed to open logger: %s:%s\n", path + 1, strerror(errno));
             return -1;
         }

@@ -66,11 +66,12 @@ static int on_config(h2o_configurator_command_t *cmd, h2o_configurator_context_t
         return -1;
     }
 
-    if ((fh = h2o_access_log_open_handle(path, fmt)) == NULL)
-        return -1;
-
-    h2o_vector_reserve(NULL, (h2o_vector_t *)self->handles, sizeof(self->handles->entries[0]), self->handles->size + 1);
-    self->handles->entries[self->handles->size++] = fh;
+    if (!ctx->dry_run) {
+        if ((fh = h2o_access_log_open_handle(path, fmt)) == NULL)
+            return -1;
+        h2o_vector_reserve(NULL, (h2o_vector_t *)self->handles, sizeof(self->handles->entries[0]), self->handles->size + 1);
+        self->handles->entries[self->handles->size++] = fh;
+    }
 
     return 0;
 }
@@ -124,7 +125,5 @@ void h2o_access_log_register_configurator(h2o_globalconf_t *conf)
     self->super.exit = on_config_exit;
     self->handles = self->_handles_stack;
 
-    h2o_configurator_define_command(&self->super, "access-log",
-                                    H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_HOST | H2O_CONFIGURATOR_FLAG_PATH,
-                                    on_config);
+    h2o_configurator_define_command(&self->super, "access-log", H2O_CONFIGURATOR_FLAG_ALL_LEVELS, on_config);
 }

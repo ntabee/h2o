@@ -21,6 +21,7 @@
  */
 #include <assert.h>
 #include <pthread.h>
+#include "cloexec.h"
 #include "h2o/multithread.h"
 
 struct st_h2o_multithread_queue_t {
@@ -86,12 +87,10 @@ static void init_async(h2o_multithread_queue_t *queue, h2o_loop_t *loop)
 {
     int fds[2];
 
-    if (pipe(fds) != 0) {
+    if (cloexec_pipe(fds) != 0) {
         perror("pipe");
         abort();
     }
-    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
-    fcntl(fds[1], F_SETFD, FD_CLOEXEC);
     fcntl(fds[1], F_SETFL, O_NONBLOCK);
     queue->async.write = fds[1];
     queue->async.read = h2o_evloop_socket_create(loop, fds[0], NULL, 0, 0);
@@ -172,5 +171,13 @@ void h2o_multithread_send_message(h2o_multithread_receiver_t *receiver, h2o_mult
         while (write(receiver->queue->async.write, "", 1) == -1 && errno == EINTR)
             ;
 #endif
+    }
+}
+
+void h2o_multithread_create_thread(pthread_t *tid, const pthread_attr_t *attr, void *(*func)(void *), void *arg)
+{
+    if (pthread_create(tid, attr, func, arg) != 0) {
+        perror("pthread_create");
+        abort();
     }
 }

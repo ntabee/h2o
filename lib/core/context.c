@@ -24,15 +24,24 @@
 #include <sys/time.h>
 #include "h2o.h"
 
-static void on_context_init(h2o_context_t *ctx, h2o_pathconf_t *pathconf)
+void h2o_context_init_pathconf_context(h2o_context_t *ctx, h2o_pathconf_t *pathconf)
 {
+    /* add pathconf to the inited list (or return if already inited) */
+    size_t i;
+    for (i = 0; i != ctx->_pathconfs_inited.size; ++i)
+        if (ctx->_pathconfs_inited.entries[i] == pathconf)
+            return;
+    h2o_vector_reserve(NULL, (void *)&ctx->_pathconfs_inited, sizeof(ctx->_pathconfs_inited.entries[0]),
+                       ctx->_pathconfs_inited.size + 1);
+    ctx->_pathconfs_inited.entries[ctx->_pathconfs_inited.size++] = pathconf;
+
 #define DOIT(type, list)                                                                                                           \
     do {                                                                                                                           \
         size_t i;                                                                                                                  \
         for (i = 0; i != pathconf->list.size; ++i) {                                                                               \
             type *o = pathconf->list.entries[i];                                                                                   \
             if (o->on_context_init != NULL)                                                                                        \
-                ctx->_module_configs[o->_config_slot] = o->on_context_init(o, ctx);                                                \
+                o->on_context_init(o, ctx);                                                                                        \
         }                                                                                                                          \
     } while (0)
 
@@ -43,8 +52,17 @@ static void on_context_init(h2o_context_t *ctx, h2o_pathconf_t *pathconf)
 #undef DOIT
 }
 
-static void on_context_dispose(h2o_context_t *ctx, h2o_pathconf_t *pathconf)
+void h2o_context_dispose_pathconf_context(h2o_context_t *ctx, h2o_pathconf_t *pathconf)
 {
+    /* nullify pathconf in the inited list (or return if already disposed) */
+    size_t i;
+    for (i = 0; i != ctx->_pathconfs_inited.size; ++i)
+        if (ctx->_pathconfs_inited.entries[i] == pathconf)
+            break;
+    if (i == ctx->_pathconfs_inited.size)
+        return;
+    ctx->_pathconfs_inited.entries[i] = NULL;
+
 #define DOIT(type, list)                                                                                                           \
     do {                                                                                                                           \
         size_t i;                                                                                                                  \
@@ -93,9 +111,9 @@ void h2o_context_init(h2o_context_t *ctx, h2o_loop_t *loop, h2o_globalconf_t *co
         h2o_hostconf_t *hostconf = config->hosts[i];
         for (j = 0; j != hostconf->paths.size; ++j) {
             h2o_pathconf_t *pathconf = hostconf->paths.entries + j;
-            on_context_init(ctx, pathconf);
+            h2o_context_init_pathconf_context(ctx, pathconf);
         }
-        on_context_init(ctx, &hostconf->fallback_path);
+        h2o_context_init_pathconf_context(ctx, &hostconf->fallback_path);
     }
     pthread_mutex_unlock(&mutex);
 }
@@ -109,9 +127,11 @@ void h2o_context_dispose(h2o_context_t *ctx)
         h2o_hostconf_t *hostconf = config->hosts[i];
         for (j = 0; j != hostconf->paths.size; ++j) {
             h2o_pathconf_t *pathconf = hostconf->paths.entries + j;
-            on_context_dispose(ctx, pathconf);
+            h2o_context_dispose_pathconf_context(ctx, pathconf);
         }
+        h2o_context_dispose_pathconf_context(ctx, &hostconf->fallback_path);
     }
+    free(ctx->_pathconfs_inited.entries);
     free(ctx->_module_configs);
     h2o_timeout_dispose(ctx->loop, &ctx->zero_timeout);
     h2o_timeout_dispose(ctx->loop, &ctx->one_sec_timeout);

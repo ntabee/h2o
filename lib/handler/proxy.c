@@ -19,6 +19,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
+#include <sys/un.h>
 #include "h2o.h"
 #include "h2o/socketpool.h"
 
@@ -66,7 +67,7 @@ static int on_req(h2o_handler_t *_self, h2o_req_t *req)
     return 0;
 }
 
-static void *on_context_init(h2o_handler_t *_self, h2o_context_t *ctx)
+static void on_context_init(h2o_handler_t *_self, h2o_context_t *ctx)
 {
     struct rp_handler_t *self = (void *)_self;
 
@@ -76,13 +77,15 @@ static void *on_context_init(h2o_handler_t *_self, h2o_context_t *ctx)
 
     /* setup a specific client context if io timeout is different */
     if (ctx->globalconf->proxy.io_timeout == self->config.io_timeout)
-        return NULL;
+        return;
+
     h2o_http1client_ctx_t *client_ctx = h2o_mem_alloc(sizeof(*ctx) + sizeof(*client_ctx->io_timeout));
     client_ctx->loop = ctx->loop;
     client_ctx->getaddr_receiver = &ctx->receivers.hostinfo_getaddr;
     client_ctx->io_timeout = (void *)(client_ctx + 1);
     h2o_timeout_init(client_ctx->loop, client_ctx->io_timeout, self->config.io_timeout);
-    return client_ctx;
+
+    h2o_context_set_handler_context(ctx, &self->super, client_ctx);
 }
 
 static void on_context_dispose(h2o_handler_t *_self, h2o_context_t *ctx)
@@ -123,12 +126,19 @@ void h2o_proxy_register_reverse_proxy(h2o_pathconf_t *pathconf, h2o_url_t *upstr
     self->super.on_context_dispose = on_context_dispose;
     self->super.dispose = on_handler_dispose;
     self->super.on_req = on_req;
-    h2o_url_copy(NULL, &self->upstream, upstream);
     if (config->keepalive_timeout != 0) {
         self->sockpool = h2o_mem_alloc(sizeof(*self->sockpool));
-        h2o_socketpool_init_by_hostport(self->sockpool, self->upstream.host, h2o_url_get_port(&self->upstream),
-                                        SIZE_MAX /* FIXME */);
+        struct sockaddr_un sa;
+        const char *to_sa_err;
+        if ((to_sa_err = h2o_url_host_to_sun(upstream->host, &sa)) == h2o_url_host_to_sun_err_is_not_unix_socket) {
+            h2o_socketpool_init_by_hostport(self->sockpool, upstream->host, h2o_url_get_port(upstream), SIZE_MAX /* FIXME */);
+        } else {
+            assert(to_sa_err == NULL);
+            h2o_socketpool_init_by_address(self->sockpool, (void *)&sa, sizeof(sa), SIZE_MAX /* FIXME */);
+        }
     }
+    h2o_url_copy(NULL, &self->upstream, upstream);
+    h2o_strtolower(self->upstream.host.base, self->upstream.host.len);
     self->config = *config;
 #ifdef H2O_TILE
     return self;

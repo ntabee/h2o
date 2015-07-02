@@ -7,6 +7,28 @@ This document describes the configuration directives of the file handler.
 
 <?
 $ctx->{directive}->(
+    name    => "file.custom-handler",
+    levels  => [ qw(global host path) ],
+    desc    => q{The directive maps extensions to a custom handler (e.g. FastCGI).},
+)->(sub {
+?>
+<p>
+The directive accepts a mapping containing configuration directives that can be used at the <code>extension</code> level, together with a property named <code>extension</code> specifying a extension (starting with <code>.</code>) or a sequence of extensions to which the directives should be applied.
+Only one handler must exist within the directives.
+</p>
+<?= $ctx->{example}->('Mapping PHP files to FastCGI', <<'EOT')
+file.custom-handler:
+  extension: .php
+  fastcgi.connect:
+    port: /tmp/fcgi.sock
+    type: unix
+
+EOT
+?>
+? })
+
+<?
+$ctx->{directive}->(
     name    => "file.dir",
     levels  => [ qw(path) ],
     desc    => q{The directive specifies the directory under which should be served for the corresponding path.},

@@ -4,7 +4,9 @@
 <h2>About H2O</h2>
 
 <div>
-H2O is a very fast HTTP server written in C. It can also be <a href="faq.html#libh2o">used as a library</a>.
+H2O is a new generation HTTP server <b>providing quicker response to users</b> when compared to older generation of web servers.
+
+Written in C, can also be <a href="faq.html#libh2o">used as a library</a>.
 </div>
 
 <h3>Key Features</h3>
@@ -19,33 +21,42 @@ H2O is a very fast HTTP server written in C. It can also be <a href="faq.html#li
 <ul>
 <li>supports the final version<?= $note->("also supports draft 14 and 16 for compatibility") ?></li>
 <li>negotiation methods: NPN, ALPN, Upgrade, direct</li>
-<li>dependency and weight-based prioritization</li>
+<li>dependency and weight-based prioritization, with tweaks for Google Chrome</li>
 <li>server push</li>
 </ul>
 </li>
 <li>WebSocket<?= $note->("only usable at library level") ?></li>
+<li>TCP Fast Open
 <li>TLS
 <ul>
-<li>uses OpenSSL or LibreSSL</li>
-<li>forward secrecy</li>
-<li>AEAD ciphers including the upcoming ones preferred by Google Chrome<?= $note->(q{chacha20-poly1305; see also: <a href="https://blog.cloudflare.com/do-the-chacha-better-mobile-performance-with-cryptography/">Do the ChaCha: better mobile performance with cryptography</a>}) ?></li>
+<li>forward secrecy, session resumption and session tickets<?= $note->("internal memory is used as the storage") ?></li>
+<li>AEAD ciphers including chacha20-poly1305; the cipher preferred by Google Chrome for Android<?= $note->(q{ref: <a href="https://blog.cloudflare.com/do-the-chacha-better-mobile-performance-with-cryptography/">Do the ChaCha: better mobile performance with cryptography</a>}) ?></li>
 <li>OCSP stapling<?= $note->("automatically enabled") ?></li>
-<li>session resumption and session tickets<?= $note->("internal memory is used as the storage") ?></li>
 </ul>
 </li>
 <li>static file serving
 <ul>
-<li>conditional GET using last-modified / etag</li>
-<li>directory listing</li>
-<li>mime-type configuration</li>
+<li>conditional GETs and range requests
+<li>directory listing
+<li>mime-type configuration
 </ul>
 </li>
+<li>FastCGI
+<ul>
+<li>path-based and extension-based configuration
+<li>starts / stops the process manager automatically
+</ul>
 <li>reverse proxy
 <ul>
 <li>HTTP/1.x only<?= $note->("HTTPS is not supported") ?></li>
-<li>persistent upstream connection</li>
+<li>persistent upstream connection with hostname lookups</li>
 </ul>
 </li>
+<li>URL rewriting
+<ul>
+<li>delegation-based (no need to use regular expressions)
+<li>recognizes <code>X-Reproxy-URL</code> header sent by web applications
+</ul>
 <li>access-logging
 <ul>
 <li>apache-like format strings</li>
@@ -55,6 +66,22 @@ H2O is a very fast HTTP server written in C. It can also be <a href="faq.html#li
 </ul>
 
 <h3>Benchmark</h3>
+
+<h4>First-paint Time Benchmark</h4>
+
+<div>
+<p>
+First-paint time (time spent until the web browser starts rendering the new page) is an important metric in web-site performance.
+The metric is becoming even more important as access from mobile networks become the majority, due to its latency and narrow bandwidth.
+</p>
+<p>
+The chart below compares the first-paint times of different web browsers / HTTP servers on network with latency of 100 milliseconds (typical for 4G mobile network).
+H2O reduces the time by a large margin, by fully implementing the prioritization logic defined by HTTP/2 and with tweaks to adjust the behavior of the web browsers<?= $note->(q{benchmark details are explained in <a href="http://blog.kazuhooku.com/2015/06/http2-and-h2o-improves-user-experience.html">HTTP/2 (and H2O) improves user experience over HTTP/1.1 or SPDY</a>}) ?>.
+</p>
+<div align="center">
+<a href="assets/firstpaintbench.png" target="_blank"><img src="assets/firstpaintbench.png" width="400"></a>
+</div>
+</div>
 
 <h4>Remote Benchmark</h4>
 

@@ -51,23 +51,24 @@ static int setup_configurators(h2o_configurator_context_t *ctx, int is_enter, yo
     return 0;
 }
 
-static int apply_commands(h2o_configurator_context_t *ctx, int flags_mask, yoml_t *node)
+int h2o_configurator_apply_commands(h2o_configurator_context_t *ctx, yoml_t *node, int flags_mask, const char **ignore_commands)
 {
-    struct {
+    struct st_cmd_value_t {
         h2o_configurator_command_t *cmd;
         yoml_t *value;
-    } *deferred;
-    size_t num_deferred = 0, i;
+    };
+    H2O_VECTOR(struct st_cmd_value_t) deferred = {}, semi_deferred = {};
+    size_t i;
+    int ret = -1;
 
     if (node->type != YOML_TYPE_MAPPING) {
         h2o_configurator_errprintf(NULL, node, "node must be a MAPPING");
-        return -1;
+        goto Exit;
     }
-    deferred = alloca(sizeof(*deferred) * node->data.mapping.size);
 
     /* call on_enter of every configurator */
     if (setup_configurators(ctx, 1, node) != 0)
-        return -1;
+        goto Exit;
 
     /* handle the configuration commands */
     for (i = 0; i != node->data.mapping.size; ++i) {
@@ -76,15 +77,21 @@ static int apply_commands(h2o_configurator_context_t *ctx, int flags_mask, yoml_
         /* obtain the target command */
         if (key->type != YOML_TYPE_SCALAR) {
             h2o_configurator_errprintf(NULL, key, "command must be a string");
-            return -1;
+            goto Exit;
+        }
+        if (ignore_commands != NULL) {
+            size_t i;
+            for (i = 0; ignore_commands[i] != NULL; ++i)
+                if (strcmp(ignore_commands[i], key->data.scalar) == 0)
+                    goto SkipCommand;
         }
         if ((cmd = h2o_configurator_get_command(ctx->globalconf, key->data.scalar)) == NULL) {
             h2o_configurator_errprintf(NULL, key, "unknown command: %s", key->data.scalar);
-            return -1;
+            goto Exit;
         }
         if ((cmd->flags & flags_mask) == 0) {
             h2o_configurator_errprintf(cmd, key, "the command cannot be used at this level");
-            return -1;
+            goto Exit;
         }
         /* check value type */
         if ((cmd->flags & (H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR | H2O_CONFIGURATOR_FLAG_EXPECT_SEQUENCE |
@@ -93,19 +100,19 @@ static int apply_commands(h2o_configurator_context_t *ctx, int flags_mask, yoml_
             case YOML_TYPE_SCALAR:
                 if ((cmd->flags & H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR) == 0) {
                     h2o_configurator_errprintf(cmd, value, "argument cannot be a scalar");
-                    return -1;
+                    goto Exit;
                 }
                 break;
             case YOML_TYPE_SEQUENCE:
                 if ((cmd->flags & H2O_CONFIGURATOR_FLAG_EXPECT_SEQUENCE) == 0) {
                     h2o_configurator_errprintf(cmd, value, "argument cannot be a sequence");
-                    return -1;
+                    goto Exit;
                 }
                 break;
             case YOML_TYPE_MAPPING:
                 if ((cmd->flags & H2O_CONFIGURATOR_FLAG_EXPECT_MAPPING) == 0) {
                     h2o_configurator_errprintf(cmd, value, "argument cannot be a mapping");
-                    return -1;
+                    goto Exit;
                 }
                 break;
             default:
@@ -114,25 +121,39 @@ static int apply_commands(h2o_configurator_context_t *ctx, int flags_mask, yoml_
             }
         }
         /* handle the command (or keep it for later execution) */
-        if ((cmd->flags & H2O_CONFIGURATOR_FLAG_DEFERRED) != 0) {
-            deferred[num_deferred].cmd = cmd;
-            deferred[num_deferred].value = value;
-            ++num_deferred;
+        if ((cmd->flags & H2O_CONFIGURATOR_FLAG_SEMI_DEFERRED) != 0) {
+            h2o_vector_reserve(NULL, (void *)&semi_deferred, sizeof(semi_deferred.entries[0]), semi_deferred.size + 1);
+            semi_deferred.entries[semi_deferred.size++] = (struct st_cmd_value_t){cmd, value};
+        } else if ((cmd->flags & H2O_CONFIGURATOR_FLAG_DEFERRED) != 0) {
+            h2o_vector_reserve(NULL, (void *)&deferred, sizeof(deferred.entries[0]), deferred.size + 1);
+            deferred.entries[deferred.size++] = (struct st_cmd_value_t){cmd, value};
         } else {
             if (cmd->cb(cmd, ctx, value) != 0)
                 return -1;
         }
+    SkipCommand:
+        ;
     }
-    for (i = 0; i != num_deferred; ++i) {
-        if (deferred[i].cmd->cb(deferred[i].cmd, ctx, deferred[i].value) != 0)
-            return -1;
+    for (i = 0; i != semi_deferred.size; ++i) {
+        struct st_cmd_value_t *pair = semi_deferred.entries + i;
+        if (pair->cmd->cb(pair->cmd, ctx, pair->value) != 0)
+            goto Exit;
+    }
+    for (i = 0; i != deferred.size; ++i) {
+        struct st_cmd_value_t *pair = deferred.entries + i;
+        if (pair->cmd->cb(pair->cmd, ctx, pair->value) != 0)
+            goto Exit;
     }
 
     /* call on_enter of every configurator */
     if (setup_configurators(ctx, 0, node) != 0)
-        return -1;
+        goto Exit;
 
-    return 0;
+    ret = 0;
+Exit:
+    free(deferred.entries);
+    free(semi_deferred.entries);
+    return ret;
 }
 
 static int sort_from_longer_paths(const yoml_mapping_element_t *x, const yoml_mapping_element_t *y)
@@ -165,7 +186,7 @@ static int on_config_paths(h2o_configurator_command_t *cmd, h2o_configurator_con
         yoml_t *key = node->data.mapping.elements[i].key;
         yoml_t *value = node->data.mapping.elements[i].value;
         ctx->pathconf = h2o_config_register_path(ctx->hostconf, key->data.scalar);
-        if (apply_commands(ctx, H2O_CONFIGURATOR_FLAG_PATH, value) != 0)
+        if (h2o_configurator_apply_commands(ctx, value, H2O_CONFIGURATOR_FLAG_PATH, NULL) != 0)
             return -1;
         ctx->pathconf = NULL;
     }
@@ -196,7 +217,7 @@ static int on_config_hosts(h2o_configurator_command_t *cmd, h2o_configurator_con
             return -1;
         }
         ctx->hostconf = h2o_config_register_host(ctx->globalconf, hostname, port);
-        if (apply_commands(ctx, H2O_CONFIGURATOR_FLAG_HOST, value) != 0)
+        if (h2o_configurator_apply_commands(ctx, value, H2O_CONFIGURATOR_FLAG_HOST, NULL) != 0)
             return -1;
         if (yoml_get(value, "paths") == NULL) {
             h2o_configurator_errprintf(NULL, value, "mandatory configuration directive `paths` is missing");
@@ -359,11 +380,13 @@ h2o_configurator_command_t *h2o_configurator_get_command(h2o_globalconf_t *conf,
     return NULL;
 }
 
-int h2o_configurator_apply(h2o_globalconf_t *config, yoml_t *node)
+int h2o_configurator_apply(h2o_globalconf_t *config, yoml_t *node, int dry_run)
 {
-    h2o_configurator_context_t ctx = {config};
+    h2o_configurator_context_t ctx = {};
+    ctx.globalconf = config;
+    ctx.dry_run = dry_run;
 
-    if (apply_commands(&ctx, H2O_CONFIGURATOR_FLAG_GLOBAL, node) != 0)
+    if (h2o_configurator_apply_commands(&ctx, node, H2O_CONFIGURATOR_FLAG_GLOBAL, NULL) != 0)
         return -1;
     if (config->hosts[0] == NULL) {
         h2o_configurator_errprintf(NULL, node, "mandatory configuration directive `hosts` is missing");
@@ -433,4 +456,30 @@ ssize_t h2o_configurator_get_one_of(h2o_configurator_command_t *cmd, yoml_t *nod
 Error:
     h2o_configurator_errprintf(cmd, node, "argument must be one of: %s", candidates);
     return -1;
+}
+
+char *h2o_configurator_get_cmd_path(const char *cmd)
+{
+    char *root, *cmd_fullpath;
+
+    /* just return the cmd (being strdup'ed) in case we do not need to prefix the value */
+    if (cmd[0] == '/' || strchr(cmd, '/') == NULL)
+        goto ReturnOrig;
+
+    /* obtain root */
+    if ((root = getenv("H2O_ROOT")) == NULL) {
+#ifdef H2O_ROOT
+        root = H2O_ROOT;
+#endif
+        if (root == NULL)
+            goto ReturnOrig;
+    }
+
+    /* build full-path and return */
+    cmd_fullpath = h2o_mem_alloc(strlen(root) + strlen(cmd) + 2);
+    sprintf(cmd_fullpath, "%s/%s", root, cmd);
+    return cmd_fullpath;
+
+ReturnOrig:
+    return h2o_strdup(NULL, cmd, SIZE_MAX).base;
 }
