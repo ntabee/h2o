@@ -174,7 +174,7 @@ h2o_iovec_t h2o_decode_base64url(h2o_mem_pool_t *pool, const char *src, size_t l
     char remaining_input[4];
 
     decoded.len = len * 3 / 4;
-    decoded.base = h2o_mem_alloc_pool(pool, decoded.len + 1);
+    decoded.base = pool != NULL ? h2o_mem_alloc_pool(pool, decoded.len + 1) : h2o_mem_alloc(decoded.len + 1);
     dst = (uint8_t *)decoded.base;
 
     while (len >= 4) {
@@ -221,7 +221,7 @@ Error:
     return h2o_iovec_init(NULL, 0);
 }
 
-void h2o_base64_encode(char *dst, const void *_src, size_t len, int url_encoded)
+size_t h2o_base64_encode(char *_dst, const void *_src, size_t len, int url_encoded)
 {
     static const char *MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                              "abcdefghijklmnopqrstuvwxyz"
@@ -230,6 +230,7 @@ void h2o_base64_encode(char *dst, const void *_src, size_t len, int url_encoded)
                                          "abcdefghijklmnopqrstuvwxyz"
                                          "0123456789-_";
 
+    char *dst = _dst;
     const uint8_t *src = _src;
     const char *map = url_encoded ? MAP_URL_ENCODED : MAP;
     uint32_t quad;
@@ -259,6 +260,43 @@ void h2o_base64_encode(char *dst, const void *_src, size_t len, int url_encoded)
         }
     }
 
+    *dst = '\0';
+    return dst - _dst;
+}
+
+static int decode_hex(int ch)
+{
+    if ('0' <= ch && ch <= '9')
+        return ch - '0';
+    if ('A' <= ch && ch <= 'F')
+        return ch - 'A' + 0xa;
+    if ('a' <= ch && ch <= 'f')
+        return ch - 'a' + 0xa;
+    return -1;
+}
+
+int h2o_hex_decode(void *_dst, const char *src, size_t src_len)
+{
+    unsigned char *dst = _dst;
+
+    if (src_len % 2 != 0)
+        return -1;
+    for (; src_len != 0; src_len -= 2) {
+        int hi, lo;
+        if ((hi = decode_hex(*src++)) == -1 || (lo = decode_hex(*src++)) == -1)
+            return -1;
+        *dst++ = (hi << 4) | lo;
+    }
+    return 0;
+}
+
+void h2o_hex_encode(char *dst, const void *_src, size_t src_len)
+{
+    const unsigned char *src = _src, *src_end = src + src_len;
+    for (; src != src_end; ++src) {
+        *dst++ = "0123456789abcdef"[*src >> 4];
+        *dst++ = "0123456789abcdef"[*src & 0xf];
+    }
     *dst = '\0';
 }
 

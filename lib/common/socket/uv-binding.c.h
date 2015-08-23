@@ -85,14 +85,22 @@ static void on_read_ssl(uv_stream_t *stream, ssize_t nread, const uv_buf_t *_unu
 static void on_do_write_complete(uv_write_t *wreq, int status)
 {
     struct st_h2o_uv_socket_t *sock = H2O_STRUCT_FROM_MEMBER(struct st_h2o_uv_socket_t, _wreq, wreq);
-    on_write_complete(&sock->super, status);
+    if (sock->super._cb.write != NULL)
+        on_write_complete(&sock->super, status);
+}
+
+static void free_sock(uv_handle_t *handle)
+{
+    struct st_h2o_uv_socket_t *sock = handle->data;
+    uv_close_cb cb = sock->uv.close_cb;
+    free(sock);
+    cb(handle);
 }
 
 void do_dispose_socket(h2o_socket_t *_sock)
 {
     struct st_h2o_uv_socket_t *sock = (struct st_h2o_uv_socket_t *)_sock;
-    uv_close((uv_handle_t *)sock->uv.stream, sock->uv.close_cb);
-    free(sock);
+    uv_close((uv_handle_t *)sock->uv.stream, free_sock);
 }
 
 void do_read_start(h2o_socket_t *_sock)
@@ -212,7 +220,7 @@ socklen_t h2o_socket_getsockname(h2o_socket_t *_sock, struct sockaddr *sa)
     return (socklen_t)len;
 }
 
-socklen_t h2o_socket_getpeername(h2o_socket_t *_sock, struct sockaddr *sa)
+socklen_t get_peername_uncached(h2o_socket_t *_sock, struct sockaddr *sa)
 {
     struct st_h2o_uv_socket_t *sock = (void *)_sock;
     int len = sizeof(struct sockaddr_storage);

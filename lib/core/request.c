@@ -323,6 +323,22 @@ void h2o_ostream_send_next(h2o_ostream_t *ostream, h2o_req_t *req, h2o_iovec_t *
     ostream->next->do_send(ostream->next, req, bufs, bufcnt, is_final);
 }
 
+void h2o_req_fill_mime_attributes(h2o_req_t *req)
+{
+    ssize_t content_type_index;
+    h2o_mimemap_type_t *mime;
+
+    if (req->res.mime_attr != NULL)
+        return;
+
+    if ((content_type_index = h2o_find_header(&req->res.headers, H2O_TOKEN_CONTENT_TYPE, -1)) != -1 &&
+        (mime = h2o_mimemap_get_type_by_mimetype(req->pathconf->mimemap, req->res.headers.entries[content_type_index].value)) !=
+            NULL)
+        req->res.mime_attr = &mime->data.attr;
+    else
+        req->res.mime_attr = &h2o_mime_attributes_as_is;
+}
+
 void h2o_send_inline(h2o_req_t *req, const char *body, size_t len)
 {
     static h2o_generator_t generator = {NULL, NULL};
@@ -455,4 +471,19 @@ void h2o_send_redirect_internal(h2o_req_t *req, int status, const char *url_str,
         method = req->method;
 
     h2o_reprocess_request_deferred(req, method, url.scheme, url.authority, url.path, authority_changed ? req->overrides : NULL, 1);
+}
+
+void h2o_register_push_path_in_link_header(h2o_req_t *req, const char *value, size_t value_len)
+{
+    if (req->version < 0x200 || req->res_is_delegated)
+        return;
+
+    h2o_iovec_t path =
+        h2o_extract_push_path_from_link_header(&req->pool, value, value_len, req->input.scheme, &req->input.authority, &req->path);
+    if (path.base == NULL)
+        return;
+
+    h2o_vector_reserve(&req->pool, (h2o_vector_t *)&req->http2_push_paths, sizeof(req->http2_push_paths.entries[0]),
+                       req->http2_push_paths.size + 1);
+    req->http2_push_paths.entries[req->http2_push_paths.size++] = path;
 }

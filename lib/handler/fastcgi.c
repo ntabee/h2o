@@ -269,6 +269,9 @@ static void append_params(h2o_req_t *req, iovec_vector_t *vecs, h2o_fastcgi_conf
     /* SERVER_SOFTWARE */
     append_pair(&req->pool, vecs, H2O_STRLIT("SERVER_SOFTWARE"), req->conn->ctx->globalconf->server_name.base,
                 req->conn->ctx->globalconf->server_name.len);
+    /* set HTTPS: on if necessary */
+    if (req->scheme == &H2O_URL_SCHEME_HTTPS)
+        append_pair(&req->pool, vecs, H2O_STRLIT("HTTPS"), H2O_STRLIT("on"));
     { /* headers */
         const h2o_header_t *h = req->headers.entries, *h_end = h + req->headers.size;
         size_t cookie_length = 0;
@@ -506,8 +509,10 @@ static int fill_headers(h2o_req_t *req, struct phr_header *headers, size_t num_h
                 RFC suggests abs-path-style Location headers should trigger an internal redirection, but is that how the web servers
                 work?
                  */
-                h2o_add_header_token(&req->pool, &req->res.headers, token,
-                                     h2o_strdup(&req->pool, headers[i].value, headers[i].value_len).base, headers[i].value_len);
+                h2o_add_header(&req->pool, &req->res.headers, token,
+                               h2o_strdup(&req->pool, headers[i].value, headers[i].value_len).base, headers[i].value_len);
+                if (token == H2O_TOKEN_LINK)
+                    h2o_register_push_path_in_link_header(req, headers[i].value, headers[i].value_len);
             }
         } else if (h2o_memis(headers[i].name, headers[i].name_len, H2O_STRLIT("status"))) {
             h2o_iovec_t value = h2o_iovec_init(headers[i].value, headers[i].value_len);

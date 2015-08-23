@@ -19,21 +19,15 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-
-#ifdef H2O_USE_MRUBY
-
-#include "h2o.h"
-#include "h2o/mruby.h"
+#include <errno.h>
 #include <mruby.h>
 #include <mruby/proc.h>
 #include <mruby/compile.h>
 #include <mruby/string.h>
+#include "h2o.h"
+#include "h2o/mruby.h"
 
-#include <errno.h>
-
-#define MODULE_NAME "h2o_mruby"
-#define MODULE_VERSION "0.0.1"
-#define MODULE_DESCRIPTION MODULE_NAME "/" MODULE_VERSION
+void h2o_mrb_class_init(mrb_state *mrb);
 
 enum code_type { H2O_MRUBY_STRING, H2O_MRUBY_FILE };
 
@@ -64,7 +58,7 @@ static void h2o_mruby_compile_code(mrb_state *mrb, h2o_iovec_t *path, h2o_mruby_
 
     if ((fp = fopen(path->base, "r")) == NULL) {
         code->proc = NULL;
-        fprintf(stderr, "%s: failed to open mruby script: %s(%s)\n", MODULE_NAME, path->base, strerror(errno));
+        fprintf(stderr, "%s: failed to open mruby script: %s(%s)\n", H2O_MRUBY_MODULE_NAME, path->base, strerror(errno));
         return;
     }
 
@@ -74,7 +68,7 @@ static void h2o_mruby_compile_code(mrb_state *mrb, h2o_iovec_t *path, h2o_mruby_
     if ((p = mrb_parse_file(mrb, fp, code->ctx)) == NULL) {
         code->proc = NULL;
         fclose(fp);
-        fprintf(stderr, "%s: failed to mrb_parse_file: %s\n", MODULE_NAME, path->base);
+        fprintf(stderr, "%s: failed to mrb_parse_file: %s\n", H2O_MRUBY_MODULE_NAME, path->base);
         return;
     }
     code->proc = mrb_generate_code(mrb, p);
@@ -92,12 +86,13 @@ static void on_context_init(h2o_handler_t *_handler, h2o_context_t *ctx)
 
     /* ctx has a mrb_state per thread */
     handler_ctx->mrb = mrb_open();
+    h2o_mrb_class_init(handler_ctx->mrb);
     handler_ctx->h2o_mruby_handler_code = h2o_mem_alloc(sizeof(*handler_ctx->h2o_mruby_handler_code));
 
     if (handler_ctx->mrb) {
         h2o_mruby_compile_code(handler_ctx->mrb, &handler->config.mruby_handler_path, handler_ctx->h2o_mruby_handler_code);
     } else {
-        fprintf(stderr, "%s: failed to mrb_open\n", MODULE_NAME);
+        fprintf(stderr, "%s: failed to mrb_open\n", H2O_MRUBY_MODULE_NAME);
     }
     h2o_context_set_handler_context(ctx, &handler->super, handler_ctx);
 }
@@ -127,30 +122,60 @@ static int on_req(h2o_handler_t *_handler, h2o_req_t *req)
 {
     h2o_mruby_handler_t *handler = (void *)_handler;
     h2o_mruby_context_t *handler_ctx = h2o_context_get_handler_context(req->conn->ctx, &handler->super);
+    h2o_mruby_internal_context_t *mruby_ctx;
     mrb_state *mrb = handler_ctx->mrb;
     mrb_value result;
     mrb_int ai;
 
     if (mrb == NULL || handler_ctx->h2o_mruby_handler_code->proc == NULL) {
-        fprintf(stderr, "%s: mruby core got unexpected error\n", MODULE_NAME);
+        fprintf(stderr, "%s: mruby core got unexpected error\n", H2O_MRUBY_MODULE_NAME);
         h2o_send_error(req, 500, "Internal Server Error", "Internal Server Error", 0);
         return 0;
     }
 
     ai = mrb_gc_arena_save(mrb);
+
+    /* create mruby internal context into mrb state */
+    mruby_ctx = h2o_mem_alloc_pool(&req->pool, sizeof(h2o_mruby_internal_context_t));
+    mruby_ctx->req = req;
+    mruby_ctx->is_last = -1;
+    mrb->ud = (void *)mruby_ctx;
+
     result = mrb_run(mrb, handler_ctx->h2o_mruby_handler_code->proc, mrb_top_self(mrb));
 
     if (mrb->exc) {
         mrb_value obj = mrb_funcall(mrb, mrb_obj_value(mrb->exc), "inspect", 0);
         struct RString *error = mrb_str_ptr(obj);
-        fprintf(stderr, "%s: mruby raised: %s\n", MODULE_NAME, error->as.heap.ptr);
+        fprintf(stderr, "%s: mruby raised: %s\n", H2O_MRUBY_MODULE_NAME, error->as.heap.ptr);
         mrb->exc = 0;
         h2o_send_error(req, 500, "Internal Server Error", "Internal Server Error", 0);
+        goto OK;
+    } else if (mrb_nil_p(result)) {
+        if (mruby_ctx->is_last == 1) {
+            /* ran H2O.return method with http status code(1xx - 5xx) */
+            goto OK;
+        }
+        /* decline to send response for next handler when return value is nil */
+        goto DECLINED;
     } else {
-        h2o_send_error(req, 200, "h2o_mruby dayo", mrb_str_to_cstr(mrb, result), 0);
+        if (mruby_ctx->is_last == 1) {
+            /* ran H2O.return method with http status code(1xx - 5xx) */
+            goto OK;
+        } else if (mruby_ctx->is_last == 0) {
+            /* ran H2O.return method with declined status(-1) */
+            goto DECLINED;
+        } else {
+            h2o_send_error(req, 200, "OK", mrb_str_to_cstr(mrb, result), 0);
+            goto OK;
+        }
     }
-    mrb_gc_arena_restore(mrb, ai);
 
+DECLINED:
+    mrb_gc_arena_restore(mrb, ai);
+    return -1;
+
+OK:
+    mrb_gc_arena_restore(mrb, ai);
     return 0;
 }
 
@@ -169,5 +194,3 @@ h2o_mruby_handler_t *h2o_mruby_register(h2o_pathconf_t *pathconf, h2o_mruby_conf
 
     return handler;
 }
-
-#endif /* H2O_USE_MRUBY */

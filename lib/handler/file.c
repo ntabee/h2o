@@ -170,6 +170,8 @@ static void do_multirange_proceed(h2o_generator_t *_self, h2o_req_t *req)
         is_finished = 0;
     }
     h2o_send(req, vec, vecarrsize, is_finished);
+    if (is_finished)
+        do_close(&self->super, req);
     return;
 
 Error:
@@ -266,8 +268,20 @@ Opened:
     return self;
 }
 
+static void add_headers_unconditional(struct st_h2o_sendfile_generator_t *self, h2o_req_t *req)
+{
+    /* RFC 7232 4.1: The server generating a 304 response MUST generate any of the following header fields that would have been sent
+     * in a 200 (OK) response to the same request: Cache-Control, Content-Location, Date, ETag, Expires, and Vary (snip) a sender
+     * SHOULD NOT generate representation metadata other than the above listed fields unless said metadata exists for the purpose of
+     * guiding cache updates. */
+    if (self->etag_len != 0)
+        h2o_add_header(&req->pool, &req->res.headers, H2O_TOKEN_ETAG, self->etag_buf, self->etag_len);
+    if (self->send_vary)
+        h2o_add_header_token(&req->pool, &req->res.headers, H2O_TOKEN_VARY, H2O_STRLIT("accept-encoding"));
+}
+
 static void do_send_file(struct st_h2o_sendfile_generator_t *self, h2o_req_t *req, int status, const char *reason,
-                         h2o_iovec_t mime_type, int is_get)
+                         h2o_iovec_t mime_type, h2o_mime_attributes_t *mime_attr, int is_get)
 {
     /* link the request */
     self->req = req;
@@ -276,6 +290,7 @@ static void do_send_file(struct st_h2o_sendfile_generator_t *self, h2o_req_t *re
     req->res.status = status;
     req->res.reason = reason;
     req->res.content_length = self->bytesleft;
+    req->res.mime_attr = mime_attr;
 
     if (self->ranged.range_count > 1) {
         mime_type.base = h2o_mem_alloc_pool(&req->pool, 52);
@@ -283,10 +298,7 @@ static void do_send_file(struct st_h2o_sendfile_generator_t *self, h2o_req_t *re
     }
     h2o_add_header(&req->pool, &req->res.headers, H2O_TOKEN_CONTENT_TYPE, mime_type.base, mime_type.len);
     h2o_add_header(&req->pool, &req->res.headers, H2O_TOKEN_LAST_MODIFIED, self->last_modified.buf, H2O_TIMESTR_RFC1123_LEN);
-    if (self->etag_len != 0)
-        h2o_add_header(&req->pool, &req->res.headers, H2O_TOKEN_ETAG, self->etag_buf, self->etag_len);
-    if (self->send_vary)
-        h2o_add_header_token(&req->pool, &req->res.headers, H2O_TOKEN_VARY, H2O_STRLIT("accept-encoding"));
+    add_headers_unconditional(self, req);
     if (self->is_gzip)
         h2o_add_header(&req->pool, &req->res.headers, H2O_TOKEN_CONTENT_ENCODING, H2O_STRLIT("gzip"));
     if (self->ranged.range_count == 0)
@@ -346,7 +358,7 @@ int h2o_file_send(h2o_req_t *req, int status, const char *reason, const char *pa
     if ((self = create_generator(req, path, strlen(path), &is_dir, flags)) == NULL)
         return -1;
     /* note: is_dir is not handled */
-    do_send_file(self, req, status, reason, mime_type, 1);
+    do_send_file(self, req, status, reason, mime_type, NULL, 1);
     return 0;
 }
 
@@ -530,13 +542,15 @@ static int try_dynamic_request(h2o_file_handler_t *self, h2o_req_t *req, char *r
     }
 
     /* file found! */
-    h2o_mimemap_type_t *mime_type = h2o_mimemap_get_type(self->mimemap, h2o_get_filext(rpath, slash_at));
+    h2o_mimemap_type_t *mime_type = h2o_mimemap_get_type_by_extension(self->mimemap, h2o_get_filext(rpath, slash_at));
     switch (mime_type->type) {
     case H2O_MIMEMAP_TYPE_MIMETYPE:
         return -1;
     case H2O_MIMEMAP_TYPE_DYNAMIC:
         return delegate_dynamic_request(req, req->pathconf->path.len + slash_at - self->real_path.len, rpath, slash_at, mime_type);
     }
+    fprintf(stderr, "unknown h2o_miemmap_type_t::type (%d)\n", (int)mime_type->type);
+    abort();
 }
 
 static void send_method_not_allowed(h2o_req_t *req)
@@ -642,7 +656,7 @@ Opened:
     }
 
     /* obtain mime type */
-    mime_type = h2o_mimemap_get_type(self->mimemap, h2o_get_filext(rpath, rpath_len));
+    mime_type = h2o_mimemap_get_type_by_extension(self->mimemap, h2o_get_filext(rpath, rpath_len));
     switch (mime_type->type) {
     case H2O_MIMEMAP_TYPE_MIMETYPE:
         break;
@@ -716,17 +730,19 @@ Opened:
                                  (sizeof("\r\n") - 1);
             generator->bytesleft = final_content_len;
         }
-        do_send_file(generator, req, 206, "Partial Content", mime_type->data.mimetype, method_type == METHOD_IS_GET);
+        do_send_file(generator, req, 206, "Partial Content", mime_type->data.mimetype, &h2o_mime_attributes_as_is,
+                     method_type == METHOD_IS_GET);
         return 0;
     }
 
     /* return file */
-    do_send_file(generator, req, 200, "OK", mime_type->data.mimetype, method_type == METHOD_IS_GET);
+    do_send_file(generator, req, 200, "OK", mime_type->data.mimetype, &mime_type->data.attr, method_type == METHOD_IS_GET);
     return 0;
 
 NotModified:
     req->res.status = 304;
     req->res.reason = "Not Modified";
+    add_headers_unconditional(generator, req);
     h2o_send_inline(req, NULL, 0);
 Close:
     do_close(&generator->super, req);

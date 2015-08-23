@@ -11,7 +11,7 @@ use Test::More;
 use Time::HiRes qw(sleep);
 
 use base qw(Exporter);
-our @EXPORT = qw(ASSETS_DIR DOC_ROOT bindir exec_unittest spawn_server spawn_h2o empty_ports create_data_file md5_file prog_exists run_prog openssl_can_negotiate curl_supports_http2);
+our @EXPORT = qw(ASSETS_DIR DOC_ROOT bindir server_features exec_unittest spawn_server spawn_h2o empty_ports create_data_file md5_file prog_exists run_prog openssl_can_negotiate curl_supports_http2);
 
 use constant ASSETS_DIR => 't/assets';
 use constant DOC_ROOT   => ASSETS_DIR . "/doc_root";
@@ -20,11 +20,46 @@ sub bindir {
     $ENV{BINARY_DIR} || '.';
 }
 
+sub server_features {
+    open my $fh, "-|", bindir() . "/h2o", "--version"
+        or die "failed to invoke: h2o --version:$!";
+    <$fh>; # skip h2o version
+    +{
+        map { chomp($_); split /:/, $_, 2 } <$fh>
+    };
+}
+
 sub exec_unittest {
     my $base = shift;
     my $fn = bindir() . "/t-00unit-$base.t";
     plan skip_all => "unit test:$base does not exist"
         if ! -e $fn;
+
+    if (prog_exists("memcached")) {
+        my $port = empty_port();
+        pipe my $rfh, my $wfh
+            or die "pipe failed:$!";
+        my $pid = fork;
+        die "fork failed:$!"
+            unless defined $pid;
+        if ($pid == 0) {
+            # child process
+            close $wfh;
+            POSIX::dup2($rfh->fileno, 5)
+                or die "dup2 failed:$!";
+            exec qw(share/h2o/kill-on-close -- memcached -l 127.0.0.1 -p), $port;
+            exit 1;
+        }
+        close $rfh;
+        POSIX::dup($wfh->fileno)
+            or die "dup failed:$!";
+        sleep 1;
+        if (waitpid($pid, WNOHANG) == $pid) {
+            die "failed to launch memcached";
+        }
+        $ENV{MEMCACHED_PORT} = $port;
+    }
+
     exec $fn;
     die "failed to exec $fn:$!";
 }

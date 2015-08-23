@@ -62,10 +62,13 @@
 #if H2O_TILE && (!H2O_TILE_PROXY)
 #include "mapnik-bridge.h"
 #endif
+#include "git-revision.h"
 /*--------------------*/
+
 #ifdef H2O_USE_MRUBY
 #include "h2o/mruby.h"
 #endif
+#include "standalone.h"
 
 /* simply use a large value, and let the kernel clip it to the internal max */
 #define H2O_SOMAXCONN (65535)
@@ -75,6 +78,7 @@
 #else
 #define H2O_DEFAULT_LENGTH_TCP_FASTOPEN_QUEUE 0
 #endif
+
 #define H2O_DEFAULT_NUM_NAME_RESOLUTION_THREADS 32
 
 struct listener_ssl_config_t {
@@ -101,12 +105,11 @@ struct listener_config_t {
     socklen_t addrlen;
     h2o_hostconf_t **hosts;
     H2O_VECTOR(struct listener_ssl_config_t *) ssl;
+    int proxy_protocol;
 };
 
 struct listener_ctx_t {
-    h2o_context_t *ctx;
-    h2o_hostconf_t **hosts;
-    SSL_CTX *ssl_ctx;
+    h2o_accept_ctx_t accept_ctx;
     h2o_socket_t *sock;
 };
 
@@ -127,7 +130,6 @@ static struct {
     } server_starter;
     struct listener_config_t **listeners;
     size_t num_listeners;
-    struct passwd *running_user; /* NULL if not set */
     char *pid_file;
     char *error_log;
     int max_connections;
@@ -137,6 +139,7 @@ static struct {
         pthread_t tid;
         h2o_context_t ctx;
         h2o_multithread_receiver_t server_notifications;
+        h2o_multithread_receiver_t memcached;
     } *threads;
     volatile sig_atomic_t shutdown_requested;
     struct {
@@ -151,7 +154,6 @@ static struct {
     {},              /* server_starter */
     NULL,            /* listeners */
     0,               /* num_listeners */
-    NULL,            /* running_user */
     NULL,            /* pid_file */
     NULL,            /* error_log */
     1024,            /* max_connections */
@@ -174,42 +176,6 @@ static int on_openssl_print_errors(const char *str, size_t len, void *fp)
 {
     fwrite(str, 1, len, fp);
     return (int)len;
-}
-
-static unsigned long openssl_thread_id_callback(void)
-{
-    return (unsigned long)pthread_self();
-}
-
-static pthread_mutex_t *openssl_thread_locks;
-
-static void openssl_thread_lock_callback(int mode, int n, const char *file, int line)
-{
-    if ((mode & CRYPTO_LOCK) != 0) {
-        pthread_mutex_lock(openssl_thread_locks + n);
-    } else if ((mode & CRYPTO_UNLOCK) != 0) {
-        pthread_mutex_unlock(openssl_thread_locks + n);
-    } else {
-        assert(!"unexpected mode");
-    }
-}
-
-static void init_openssl(void)
-{
-    static int ready = 0;
-    if (!ready) {
-        int nlocks = CRYPTO_num_locks(), i;
-        openssl_thread_locks = h2o_mem_alloc(sizeof(*openssl_thread_locks) * nlocks);
-        for (i = 0; i != nlocks; ++i)
-            pthread_mutex_init(openssl_thread_locks + i, NULL);
-        CRYPTO_set_locking_callback(openssl_thread_lock_callback);
-        CRYPTO_set_id_callback(openssl_thread_id_callback);
-        /* TODO [OpenSSL] set dynlock callbacks for better performance */
-        SSL_load_error_strings();
-        SSL_library_init();
-        OpenSSL_add_all_algorithms();
-        ready = 1;
-    }
 }
 
 static void setup_ecc_key(SSL_CTX *ssl_ctx)
@@ -516,7 +482,6 @@ static int listener_setup_ssl(h2o_configurator_command_t *cmd, h2o_configurator_
 #endif
 
     /* setup */
-    init_openssl();
     ssl_ctx = SSL_CTX_new(SSLv23_server_method());
     SSL_CTX_set_options(ssl_ctx, ssl_options);
 
@@ -645,7 +610,7 @@ static struct listener_config_t *find_listener(struct sockaddr *addr, socklen_t 
     return NULL;
 }
 
-static struct listener_config_t *add_listener(int fd, struct sockaddr *addr, socklen_t addrlen, int is_global)
+static struct listener_config_t *add_listener(int fd, struct sockaddr *addr, socklen_t addrlen, int is_global, int proxy_protocol)
 {
     struct listener_config_t *listener = h2o_mem_alloc(sizeof(*listener));
 
@@ -659,6 +624,8 @@ static struct listener_config_t *add_listener(int fd, struct sockaddr *addr, soc
         listener->hosts[0] = NULL;
     }
     memset(&listener->ssl, 0, sizeof(listener->ssl));
+    listener->proxy_protocol = proxy_protocol;
+
     conf.listeners = h2o_mem_realloc(conf.listeners, sizeof(*conf.listeners) * (conf.num_listeners + 1));
     conf.listeners[conf.num_listeners++] = listener;
 
@@ -773,6 +740,7 @@ static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_co
 {
     const char *hostname = NULL, *servname = NULL, *type = "tcp";
     yoml_t *ssl_node = NULL;
+    int proxy_protocol = 0;
 
     /* fetch servname (and hostname) */
     switch (node->type) {
@@ -806,6 +774,20 @@ static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_co
         }
         if ((t = yoml_get(node, "ssl")) != NULL)
             ssl_node = t;
+        if ((t = yoml_get(node, "proxy-protocol")) != NULL) {
+            if (t->type != YOML_TYPE_SCALAR) {
+                h2o_configurator_errprintf(cmd, node, "`proxy-protocol` must be a string");
+                return -1;
+            }
+            if (strcasecmp(t->data.scalar, "ON") == 0) {
+                proxy_protocol = 1;
+            } else if (strcasecmp(t->data.scalar, "OFF") == 0) {
+                proxy_protocol = 0;
+            } else {
+                h2o_configurator_errprintf(cmd, node, "value of `proxy-protocol` must be either of: ON,OFF");
+                return -1;
+            }
+        }
     } break;
     default:
         h2o_configurator_errprintf(cmd, node, "value must be a string or a mapping (with keys: `port` and optionally `host`)");
@@ -844,8 +826,10 @@ static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_co
             default:
                 break;
             }
-            listener = add_listener(fd, (struct sockaddr *)&sa, sizeof(sa), ctx->hostconf == NULL);
+            listener = add_listener(fd, (struct sockaddr *)&sa, sizeof(sa), ctx->hostconf == NULL, proxy_protocol);
             listener_is_new = 1;
+        } else if (listener->proxy_protocol != proxy_protocol) {
+            goto ProxyConflict;
         }
         if (listener_setup_ssl(cmd, ctx, node, ssl_node, listener, listener_is_new) != 0)
             return -1;
@@ -892,8 +876,10 @@ static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_co
                 default:
                     break;
                 }
-                listener = add_listener(fd, ai->ai_addr, ai->ai_addrlen, ctx->hostconf == NULL);
+                listener = add_listener(fd, ai->ai_addr, ai->ai_addrlen, ctx->hostconf == NULL, proxy_protocol);
                 listener_is_new = 1;
+            } else if (listener->proxy_protocol != proxy_protocol) {
+                goto ProxyConflict;
             }
             if (listener_setup_ssl(cmd, ctx, node, ssl_node, listener, listener_is_new) != 0)
                 return -1;
@@ -910,6 +896,11 @@ static int on_config_listen(h2o_configurator_command_t *cmd, h2o_configurator_co
     }
 
     return 0;
+
+ProxyConflict:
+    h2o_configurator_errprintf(cmd, node, "`proxy-protocol` cannot be turned %s, already defined as opposite",
+                               proxy_protocol ? "on" : "off");
+    return -1;
 }
 
 static int on_config_listen_enter(h2o_configurator_t *_configurator, h2o_configurator_context_t *ctx, yoml_t *node)
@@ -942,39 +933,18 @@ static int on_config_listen_exit(h2o_configurator_t *_configurator, h2o_configur
     return 0;
 }
 
-static int setup_running_user(const char *login)
-{
-    struct passwd *passwdbuf = h2o_mem_alloc(sizeof(*passwdbuf));
-    char *buf;
-    size_t bufsz = 4096;
-
-Redo:
-    buf = h2o_mem_alloc(bufsz);
-    if (getpwnam_r(login, passwdbuf, buf, bufsz, &conf.running_user) != 0) {
-        if (errno == ERANGE
-#ifdef __APPLE__
-            || errno == EINVAL /* OS X 10.9.5 returns EINVAL if bufsz == 16 */
-#endif
-            ) {
-            free(buf);
-            bufsz *= 2;
-            goto Redo;
-        }
-        perror("getpwnam_r");
-    }
-    if (conf.running_user == NULL)
-        return -1;
-
-    return 0;
-}
-
 static int on_config_user(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
 {
-    if (setup_running_user(node->data.scalar) != 0) {
-        h2o_configurator_errprintf(cmd, node, "user:%s does not exist", node->data.scalar);
+    errno = 0;
+    if (getpwnam(node->data.scalar) == NULL) {
+        if (errno == 0) {
+            h2o_configurator_errprintf(cmd, node, "user:%s does not exist", node->data.scalar);
+        } else {
+            perror("getpwnam");
+        }
         return -1;
     }
-
+    ctx->globalconf->user = h2o_strdup(NULL, node->data.scalar, SIZE_MAX).base;
     return 0;
 }
 
@@ -1000,7 +970,7 @@ static int on_config_num_threads(h2o_configurator_command_t *cmd, h2o_configurat
     if (h2o_configurator_scanf(cmd, node, "%zu", &conf.num_threads) != 0)
         return -1;
     if (conf.num_threads == 0) {
-        h2o_configurator_errprintf(cmd, node, "num-threads should be >=1");
+        h2o_configurator_errprintf(cmd, node, "num-threads must be >=1");
         return -1;
     }
     return 0;
@@ -1011,7 +981,7 @@ static int on_config_num_name_resolution_threads(h2o_configurator_command_t *cmd
     if (h2o_configurator_scanf(cmd, node, "%zu", &h2o_hostinfo_max_threads) != 0)
         return -1;
     if (h2o_hostinfo_max_threads == 0) {
-        h2o_configurator_errprintf(cmd, node, "num-name-resolution-threads should be >=1");
+        h2o_configurator_errprintf(cmd, node, "num-name-resolution-threads must be >=1");
         return -1;
     }
     return 0;
@@ -1049,7 +1019,7 @@ static int on_config_tcp_fastopen(h2o_configurator_command_t *cmd, h2o_configura
     return 0;
 }
 
-yoml_t *load_config(const char *fn)
+static yoml_t *load_config(const char *fn)
 {
     FILE *fp;
     yaml_parser_t parser;
@@ -1062,7 +1032,7 @@ yoml_t *load_config(const char *fn)
     yaml_parser_initialize(&parser);
     yaml_parser_set_input_file(&parser, fp);
 
-    yoml = yoml_parse_document(&parser, NULL, fn);
+    yoml = yoml_parse_document(&parser, NULL, NULL, fn);
 
     if (yoml == NULL)
         fprintf(stderr, "failed to parse configuration file:%s:line %d:%s\n", fn, (int)parser.problem_mark.line, parser.problem);
@@ -1194,12 +1164,9 @@ static void on_accept(h2o_socket_t *listener, int status)
         num_connections(1);
 
         sock->on_close.cb = on_socketclose;
-        sock->on_close.data = ctx->ctx;
+        sock->on_close.data = ctx->accept_ctx.ctx;
 
-        if (ctx->ssl_ctx != NULL)
-            h2o_accept_ssl(ctx->ctx, ctx->hosts, sock, ctx->ssl_ctx);
-        else
-            h2o_http1_accept(ctx->ctx, ctx->hosts, sock);
+        h2o_accept(&ctx->accept_ctx, sock);
 
     } while (--num_accepts != 0);
 }
@@ -1241,6 +1208,8 @@ H2O_NORETURN static void *run_loop(void *_thread_index)
     h2o_context_init(&conf.threads[thread_index].ctx, h2o_evloop_create(), &conf.globalconf);
     h2o_multithread_register_receiver(conf.threads[thread_index].ctx.queue, &conf.threads[thread_index].server_notifications,
                                       on_server_notification);
+    h2o_multithread_register_receiver(conf.threads[thread_index].ctx.queue, &conf.threads[thread_index].memcached,
+                                      h2o_memcached_receiver);
     conf.threads[thread_index].tid = pthread_self();
 
     /* setup listeners */
@@ -1257,13 +1226,14 @@ H2O_NORETURN static void *run_loop(void *_thread_index)
             }
             set_cloexec(fd);
         }
-        listeners[i] = (struct listener_ctx_t){
-            &conf.threads[thread_index].ctx,                                              /* ctx */
-            listener_config->hosts,                                                       /* hosts */
-            listener_config->ssl.size != 0 ? listener_config->ssl.entries[0]->ctx : NULL, /* ssl_ctx */
-            h2o_evloop_socket_create(conf.threads[thread_index].ctx.loop, fd, (struct sockaddr *)&listener_config->addr,
-                                     listener_config->addrlen, H2O_SOCKET_FLAG_DONT_READ) /* sock */
-        };
+        memset(listeners + i, 0, sizeof(listeners[i]));
+        listeners[i].accept_ctx.ctx = &conf.threads[thread_index].ctx;
+        listeners[i].accept_ctx.hosts = listener_config->hosts;
+        if (listener_config->ssl.size != 0)
+            listeners[i].accept_ctx.ssl_ctx = listener_config->ssl.entries[0]->ctx;
+        listeners[i].accept_ctx.expect_proxy_line = listener_config->proxy_protocol;
+        listeners[i].accept_ctx.libmemcached_receiver = &conf.threads[thread_index].memcached;
+        listeners[i].sock = h2o_evloop_socket_create(conf.threads[thread_index].ctx.loop, fd, H2O_SOCKET_FLAG_DONT_READ);
         listeners[i].sock->data = listeners + i;
     }
     /* and start listening */
@@ -1378,6 +1348,10 @@ static void setup_configurators(void)
 {
     h2o_config_init(&conf.globalconf);
 
+    /* let the default setuid user be "nobody", if run as root */
+    if (getuid() == 0 && getpwnam("nobody") != NULL)
+        conf.globalconf.user = "nobody";
+
     {
         h2o_configurator_t *c = h2o_configurator_create(&conf.globalconf, sizeof(*c));
         c->enter = on_config_listen_enter;
@@ -1406,6 +1380,9 @@ static void setup_configurators(void)
 #endif
 /*--------------------*/
         h2o_configurator_define_command(c, "tcp-fastopen", H2O_CONFIGURATOR_FLAG_GLOBAL, on_config_tcp_fastopen);
+        h2o_configurator_define_command(c, "ssl-session-resumption",
+                                        H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_EXPECT_MAPPING,
+                                        ssl_session_resumption_on_config);
     }
 
     h2o_access_log_register_configurator(&conf.globalconf);
@@ -1433,7 +1410,10 @@ int main(int argc, char **argv)
 
     conf.num_threads = h2o_numproc();
     conf.tfo_queues = H2O_DEFAULT_LENGTH_TCP_FASTOPEN_QUEUE;
+
     h2o_hostinfo_max_threads = H2O_DEFAULT_NUM_NAME_RESOLUTION_THREADS;
+
+    init_openssl();
     setup_configurators();
 
     { /* parse options */
@@ -1478,10 +1458,20 @@ int main(int argc, char **argv)
                 conf.run_mode = RUN_MODE_TEST;
                 break;
             case 'v':
-#ifdef H2O_TILE
+#if H2O_TILE
                 printf("h2o-tile version " H2O_VERSION ":" GIT_REVISION_SHORT "\n");
+                printf("OpenSSL: %s\n", SSLeay_version(SSLEAY_VERSION));
+#if H2O_USE_MRUBY
+                printf(
+                    "mruby: YES\n"); /* TODO determine the way to obtain the version of mruby (that is being linked dynamically) */
+#endif
 #else
                 printf("h2o version " H2O_VERSION "\n");
+                printf("OpenSSL: %s\n", SSLeay_version(SSLEAY_VERSION));
+#if H2O_USE_MRUBY
+                printf(
+                    "mruby: YES\n"); /* TODO determine the way to obtain the version of mruby (that is being linked dynamically) */
+#endif
 #endif
                 exit(0);
             case 'h':
@@ -1542,7 +1532,7 @@ int main(int argc, char **argv)
             exit(EX_CONFIG);
         if (h2o_configurator_apply(&conf.globalconf, yoml, conf.run_mode != RUN_MODE_WORKER) != 0)
             exit(EX_CONFIG);
-        yoml_free(yoml);
+        yoml_free(yoml, NULL);
 
 /*--------------------*/
 #if H2O_TILE && (!H2O_TILE_PROXY)
@@ -1618,20 +1608,16 @@ int main(int argc, char **argv)
     }
 
     /* setuid */
-    if (conf.running_user != NULL) {
-        if (h2o_setuidgid(conf.running_user) != 0) {
+    if (conf.globalconf.user != NULL) {
+        if (h2o_setuidgid(conf.globalconf.user) != 0) {
             fprintf(stderr, "failed to change the running user (are you sure you are running as root?)\n");
             return EX_OSERR;
         }
     } else {
         if (getuid() == 0) {
-            if (setup_running_user("nobody") == 0) {
-                fprintf(stderr, "cowardly switching to nobody; please use the `user` directive to set the running user\n");
-            } else {
-                fprintf(stderr, "refusing to run as root (and failed to switch to `nobody`); you can use the `user` directive to "
-                                "set the running user\n");
-                return EX_CONFIG;
-            }
+            fprintf(stderr, "refusing to run as root (and failed to switch to `nobody`); you can use the `user` directive to set "
+                            "the running user\n");
+            return EX_CONFIG;
         }
     }
 
@@ -1644,6 +1630,20 @@ int main(int argc, char **argv)
         }
         fprintf(fp, "%d\n", (int)getpid());
         fclose(fp);
+    }
+
+    { /* initialize SSL_CTXs for session resumption and ticket-based resumption (also starts memcached client threads for the
+         purpose) */
+        size_t i, j;
+        H2O_VECTOR(SSL_CTX *)ssl_contexts = {};
+        for (i = 0; i != conf.num_listeners; ++i) {
+            for (j = 0; j != conf.listeners[i]->ssl.size; ++j) {
+                h2o_vector_reserve(NULL, (void *)&ssl_contexts, sizeof(ssl_contexts.entries[0]), ssl_contexts.size + 1);
+                ssl_contexts.entries[ssl_contexts.size++] = conf.listeners[i]->ssl.entries[j]->ctx;
+            }
+        }
+        ssl_setup_session_resumption(ssl_contexts.entries, ssl_contexts.size);
+        free(ssl_contexts.entries);
     }
 
     /* all setup should be complete by now */

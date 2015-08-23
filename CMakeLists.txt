@@ -1,4 +1,4 @@
-# Copyright (c) 2014,2015 DeNA Co., Ltd., Kazuho Oku, Brian Stanback, Laurentiu Nicola
+# Copyright (c) 2014,2015 DeNA Co., Ltd., Kazuho Oku, Brian Stanback, Laurentiu Nicola, Masanori Ogino, Ryosuke Matsumoto
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to
@@ -27,6 +27,16 @@ FUNCTION (PREPEND_INCLUDE_DIRECTORY tgt dir)
 ENDFUNCTION (PREPEND_INCLUDE_DIRECTORY)
 
 PROJECT(h2o C)
+
+SET(VERSION_MAJOR "1")
+SET(VERSION_MINOR "5")
+SET(VERSION_PATCH "0")
+SET(VERSION_PRERELEASE "alpha-1")
+SET(VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}${VERSION_PRERELEASE}")
+SET(LIBRARY_VERSION_MAJOR "0")
+SET(LIBRARY_VERSION_MINOR "9")
+SET(LIBRARY_VERSION_PATCH "14")
+CONFIGURE_FILE(${CMAKE_SOURCE_DIR}/version.h.in ${CMAKE_SOURCE_DIR}/include/h2o/version.h)
 
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -116,15 +126,27 @@ IF (NOT MRUBY_FOUND)
         INCLUDE_DIRECTORIES(${MRUBY_INCLUDE_DIR})
     ENDIF (MRUBY_FOUND)
 ENDIF (NOT MRUBY_FOUND)
-IF (NOT MRUBY_FOUND)
-    SET(MRUBY_LIBRARIES -lmruby)
-ENDIF (NOT MRUBY_FOUND)
+IF (WITH_MRUBY)
+    IF (NOT MRUBY_FOUND)
+        MESSAGE(FATAL "-DWITH_MRUBY=ON was set, but could not find libmruby")
+    ENDIF (NOT MRUBY_FOUND)
+ENDIF (WITH_MRUBY)
 
-SET(CMAKE_C_FLAGS "-O2 -g -Wall -Wno-unused-function ${CMAKE_C_FLAGS} -DH2O_ROOT=\"\\\"${CMAKE_INSTALL_PREFIX}\\\"\"")
+SET(CC_WARNING_FLAGS "-Wall -Wno-unused-value -Wno-unused-function")
+IF ("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
+    SET(CC_WARNING_FLAGS "${CC_WARNING_FLAGS} -Wno-unused-but-set-variable")
+    IF (NOT ("${CMAKE_C_COMPILER_VERSION}" VERSION_LESS "4.5"))
+        SET(CC_WARNING_FLAGS "${CC_WARNING_FLAGS} -Wno-unused-result")
+    ENDIF ()
+ENDIF ()
+
+SET(CMAKE_C_FLAGS "-O2 -g ${CC_WARNING_FLAGS} ${CMAKE_C_FLAGS} -DH2O_ROOT=\"\\\"${CMAKE_INSTALL_PREFIX}\\\"\"")
 
 INCLUDE_DIRECTORIES(
     include
     deps/cloexec
+    deps/golombset
+    deps/libyrmcds
     deps/klib
     deps/picohttpparser
     deps/picotest
@@ -141,14 +163,21 @@ SET(LIBYAML_SOURCE_FILES
     deps/yaml/src/reader.c
     deps/yaml/src/scanner.c
     deps/yaml/src/writer.c)
-SET_SOURCE_FILES_PROPERTIES(${LIBYAML_SOURCE_FILES} PROPERTIES COMPILE_FLAGS "-Wno-unused-value -Wno-unused-but-set-variable")
 
 SET(LIB_SOURCE_FILES
     deps/cloexec/cloexec.c
+    deps/libyrmcds/close.c
+    deps/libyrmcds/connect.c
+    deps/libyrmcds/recv.c
+    deps/libyrmcds/send.c
+    deps/libyrmcds/socket.c
+    deps/libyrmcds/strerror.c
     deps/picohttpparser/picohttpparser.c
 
+    lib/common/file.c
     lib/common/hostinfo.c
     lib/common/http1client.c
+    lib/common/memcached.c
     lib/common/memory.c
     lib/common/multithread.c
     lib/common/serverutil.c
@@ -178,7 +207,6 @@ SET(LIB_SOURCE_FILES
     lib/handler/proxy.c
     lib/handler/redirect.c
     lib/handler/reproxy.c
-    lib/handler/mruby.c
     lib/handler/configurator/access_log.c
     lib/handler/configurator/expires.c
     lib/handler/configurator/fastcgi.c
@@ -187,10 +215,10 @@ SET(LIB_SOURCE_FILES
     lib/handler/configurator/proxy.c
     lib/handler/configurator/redirect.c
     lib/handler/configurator/reproxy.c
-    lib/handler/configurator/mruby.c
 
     lib/http1.c
 
+    lib/http2/casper.c
     lib/http2/connection.c
     lib/http2/frame.c
     lib/http2/hpack.c
@@ -199,6 +227,7 @@ SET(LIB_SOURCE_FILES
 
 SET(UNIT_TEST_SOURCE_FILES
     ${LIB_SOURCE_FILES}
+    ${LIBYAML_SOURCE_FILES}
     deps/picotest/picotest.c
     t/00unit/test.c
     t/00unit/lib/common/hostinfo.c
@@ -210,13 +239,16 @@ SET(UNIT_TEST_SOURCE_FILES
     t/00unit/lib/common/url.c
     t/00unit/lib/core/headers.c
     t/00unit/lib/core/proxy.c
+    t/00unit/lib/core/util.c
     t/00unit/lib/handler/fastcgi.c
     t/00unit/lib/handler/file.c
     t/00unit/lib/handler/headers.c
     t/00unit/lib/handler/mimemap.c
     t/00unit/lib/handler/redirect.c
+    t/00unit/lib/http2/casper.c
     t/00unit/lib/http2/hpack.c
     t/00unit/lib/http2/scheduler.c
+    t/00unit/src/ssl.c
     t/00unit/issues/293.c)
 LIST(REMOVE_ITEM UNIT_TEST_SOURCE_FILES
     lib/common/hostinfo.c
@@ -228,15 +260,29 @@ LIST(REMOVE_ITEM UNIT_TEST_SOURCE_FILES
     lib/common/url.c
     lib/core/headers.c
     lib/core/proxy.c
+    lib/core/util.c
     lib/handler/fastcgi.c
     lib/handler/file.c
     lib/handler/headers.c
     lib/handler/mimemap.c
     lib/handler/redirect.c
+    lib/http2/casper.c
     lib/http2/hpack.c
     lib/http2/scheduler.c)
 
 SET(EXTRA_LIBRARIES ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+
+IF (WITH_MRUBY)
+    ADD_DEFINITIONS("-DH2O_USE_MRUBY=1")
+    LIST(APPEND LIB_SOURCE_FILES
+        lib/handler/mruby.c
+        lib/handler/mruby/init.c
+        lib/handler/mruby/class/core.c
+        lib/handler/mruby/class/request.c
+        lib/handler/mruby/class/connection.c
+        lib/handler/configurator/mruby.c)
+    LIST(INSERT EXTRA_LIBRARIES 0 ${MRUBY_LIBRARIES} "m")
+ENDIF (WITH_MRUBY)
 
 ADD_LIBRARY(libh2o ${LIB_SOURCE_FILES})
 ADD_LIBRARY(libh2o-evloop ${LIB_SOURCE_FILES})
@@ -247,6 +293,15 @@ SET_TARGET_PROPERTIES(libh2o-evloop PROPERTIES
 IF (OPENSSL_FOUND)
     PREPEND_INCLUDE_DIRECTORY(libh2o ${OPENSSL_INCLUDE_DIR})
     PREPEND_INCLUDE_DIRECTORY(libh2o-evloop ${OPENSSL_INCLUDE_DIR})
+    IF (LIBUV_FOUND)
+        INSTALL(TARGETS libh2o DESTINATION lib)
+    ELSE (LIBUV_FOUND)
+        SET_TARGET_PROPERTIES(libh2o PROPERTIES EXCLUDE_FROM_ALL 1)
+    ENDIF (LIBUV_FOUND)
+    INSTALL(TARGETS libh2o-evloop DESTINATION lib)
+ELSE (OPENSSL_FOUND)
+    SET_TARGET_PROPERTIES(libh2o PROPERTIES EXCLUDE_FROM_ALL 1)
+    SET_TARGET_PROPERTIES(libh2o-evloop PROPERTIES EXCLUDE_FROM_ALL 1)
 ENDIF (OPENSSL_FOUND)
 
 ADD_CUSTOM_TARGET(lib-examples DEPENDS examples-http1client examples-simple examples-socket-client)
@@ -295,6 +350,7 @@ ENDIF (OPENSSL_FOUND)
 ADD_EXECUTABLE(h2o
     ${LIB_SOURCE_FILES}
     ${LIBYAML_SOURCE_FILES}
+    src/ssl.c
     src/main.c)
 SET_TARGET_PROPERTIES(h2o PROPERTIES COMPILE_FLAGS "-DH2O_USE_LIBUV=0")
 IF (WITH_BUNDLED_SSL)
@@ -307,28 +363,16 @@ ELSE (WITH_BUNDLED_SSL)
         TARGET_LINK_LIBRARIES(h2o ${OPENSSL_LIBRARIES})
     ENDIF (OPENSSL_FOUND)
 ENDIF (WITH_BUNDLED_SSL)
-IF (WITH_MRUBY)
-    ADD_DEFINITIONS("-DH2O_USE_MRUBY=1")
-    IF (APPLE)
-        SET(EXTRA_LIBRARIES ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS} ${MRUBY_LIBRARIES} "m")
-    ELSE (APPLE)
-        SET(EXTRA_LIBRARIES ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS} ${MRUBY_LIBRARIES} "m" "rt")
-    ENDIF (APPLE)
-ENDIF (WITH_MRUBY)
 TARGET_LINK_LIBRARIES(h2o ${EXTRA_LIBRARIES})
 
 INSTALL(TARGETS h2o
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib)
 
+ADD_EXECUTABLE(setuidgid src/setuidgid.c)
+INSTALL(TARGETS setuidgid RUNTIME DESTINATION share/h2o)
+
 INSTALL(DIRECTORY include/ DESTINATION include FILES_MATCHING PATTERN "*.h")
-INSTALL(TARGETS libh2o-evloop DESTINATION lib)
-# only install libh2o if libuv is found
-IF (LIBUV_FOUND)
-  INSTALL(TARGETS libh2o DESTINATION lib)
-ELSE (LIBUV_FOUND)
-  SET_TARGET_PROPERTIES(libh2o PROPERTIES EXCLUDE_FROM_ALL 1)
-ENDIF (LIBUV_FOUND)
 
 INSTALL(PROGRAMS share/h2o/annotate-backtrace-symbols share/h2o/fetch-ocsp-response share/h2o/kill-on-close share/h2o/start_server DESTINATION share/h2o)
 INSTALL(DIRECTORY doc/ DESTINATION share/doc/h2o PATTERN "Makefile" EXCLUDE PATTERN "README.md" EXCLUDE)
@@ -366,6 +410,9 @@ ADD_CUSTOM_TARGET(check env H2O_ROOT=. BINARY_DIR=${CMAKE_BINARY_DIR} prove -v t
 IF (LIBUV_FOUND)
     ADD_DEPENDENCIES(check t-00unit-libuv.t lib-examples)
 ENDIF (LIBUV_FOUND)
+
+ADD_CUSTOM_TARGET(check-as-root env H2O_ROOT=. BINARY_DIR=${CMAKE_BINARY_DIR} prove -v t/90root-*.t
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # environment-specific tweaks
 IF (APPLE)
