@@ -17,7 +17,7 @@ it builds a tiny demo-purpose tile server, covering a small region around Tokyo,
 
 A brief instruction of the setup is in [INSTALL.md](INSTALL.md).
 
-A [live demo](http://h2o-tile.ddns.net:8080/) is running on Amazon EC2
+A [live demo](http://a.tile.michisuji.com:8080/) is running on Google Compute Engine.
 
 
 Author
