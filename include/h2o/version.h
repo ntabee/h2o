@@ -32,8 +32,4 @@
 #define H2O_LIBRARY_VERSION_MINOR 10
 #define H2O_LIBRARY_VERSION_PATCH 0
 
-#ifdef H2O_TILE
-#include "git-revision.h"
-#endif
-
 #endif

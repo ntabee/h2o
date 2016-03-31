@@ -145,14 +145,18 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
 Opened:
     if ((if_none_match_header_index = h2o_find_header(&req->headers, H2O_TOKEN_IF_NONE_MATCH, SIZE_MAX)) != -1) {
         h2o_iovec_t *if_none_match = &req->headers.entries[if_none_match_header_index].value;
-        if (h2o_memis(if_none_match->base, if_none_match->len, generator->etag_buf, generator->etag_len))
+        char etag[H2O_FILECACHE_ETAG_MAXLEN+1];
+        size_t etag_len = h2o_filecache_get_etag(generator->file.ref, etag);
+        if (h2o_memis(if_none_match->base, if_none_match->len, etag, etag_len))
             goto NotModified;
     } else if ((if_modified_since_header_index = h2o_find_header(&req->headers, H2O_TOKEN_IF_MODIFIED_SINCE, SIZE_MAX)) != -1) {
         h2o_iovec_t *ims_vec = &req->headers.entries[if_modified_since_header_index].value;
-        struct tm ims_tm;
-        if (h2o_time_parse_rfc1123(ims_vec->base, ims_vec->len, &ims_tm) == 0 &&
-            generator->last_modified.packed <= time2packed(&ims_tm))
-            goto NotModified;
+        struct tm ims_tm, *last_modified_tm;
+        if (h2o_time_parse_rfc1123(ims_vec->base, ims_vec->len, &ims_tm)) {
+            last_modified_tm = h2o_filecache_get_last_modified(generator->file.ref, NULL);
+            if (!tm_is_lessthan(&ims_tm, last_modified_tm))
+                goto NotModified;
+        }
     }
 
     /* obtain mime type */
@@ -161,7 +165,7 @@ Opened:
     /* return file */
     switch (mime_type->type) {
     case H2O_MIMEMAP_TYPE_MIMETYPE:
-        do_send_file(generator, req, 200, "OK", mime_type->data.mimetype, is_get);
+        do_send_file(generator, req, 200, "OK", mime_type->data.mimetype, NULL, is_get);
         return 0;
     case H2O_MIMEMAP_TYPE_DYNAMIC:
         h2o_send_error(req, 500, "Internal Server Error", "MIME type for .png is declared as 'dynamic.'", 0);

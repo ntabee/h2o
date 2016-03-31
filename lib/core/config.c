@@ -28,6 +28,7 @@
 #include "h2o/configurator.h"
 #include "h2o/http1.h"
 #include "h2o/http2.h"
+#include "git-revision.h"
 
 static h2o_hostconf_t *create_hostconf(h2o_globalconf_t *globalconf)
 {

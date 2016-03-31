@@ -173,7 +173,7 @@ static void on_setup_ostream(h2o_filter_t *_self, h2o_req_t *req, h2o_ostream_t 
         mkdir_p_parent(store_tile->tmp_tile_path.base);
     } 
 
-    h2o_setup_next_ostream(&self->super, req, slot);
+    h2o_setup_next_ostream(req, slot);
 }
 
 static int on_req_tile(struct st_h2o_handler_t *_self, h2o_req_t *req) {
