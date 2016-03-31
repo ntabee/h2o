@@ -24,12 +24,32 @@
  *   picotemplate.pl --conf=misc/picotemplate-conf.pl lib/file/_templates.c.h
  */
 
+static int cmpstrptr(const void *_x, const void *_y)
+{
+    const char *x = *(const char **)_x;
+    const char *y = *(const char **)_y;
+    return strcmp(x, y);
+}
+
 static h2o_buffer_t *build_dir_listing_html(h2o_mem_pool_t *pool, h2o_iovec_t path_normalized, DIR* dp)
 {
+    H2O_VECTOR(char *) files = {};
+
+    { /* build list of files */
+        struct dirent dent, *dentp;
+        int ret;
+        while ((ret = readdir_r(dp, &dent, &dentp)) == 0 && dentp != NULL) {
+            if (strcmp(dent.d_name, ".") == 0 || strcmp(dent.d_name, "..") == 0)
+                continue;
+            h2o_vector_reserve(pool, &files, files.size + 1);
+            files.entries[files.size++] = h2o_strdup(pool, dent.d_name, SIZE_MAX).base;
+        }
+        if (files.size > 1)
+            qsort(files.entries, files.size, sizeof(files.entries[0]), cmpstrptr);
+    }
+
     h2o_buffer_t *_;
     h2o_iovec_t path_normalized_escaped = h2o_htmlescape(pool, path_normalized.base, path_normalized.len);
-    struct dirent dent, *dentp;
-    int ret;
 
     h2o_buffer_init(&_, &h2o_socket_buffer_prototype);
 
@@ -39,12 +59,12 @@ static h2o_buffer_t *build_dir_listing_html(h2o_mem_pool_t *pool, h2o_iovec_t pa
 ?<UL>
 ?<LI><A HREF="..">Parent Directory</A>
 
-    while ((ret = readdir_r(dp, &dent, &dentp)) == 0 && dentp != NULL) {
-        h2o_iovec_t fn_escaped;
-        if (strcmp(dent.d_name, ".") == 0 || strcmp(dent.d_name, "..") == 0)
-            continue;
-        fn_escaped = h2o_htmlescape(pool, dent.d_name, strlen(dent.d_name));
-?<LI><A HREF="<?= fn_escaped ?>"><?= fn_escaped ?></A>
+    size_t i;
+    for (i = 0; i != files.size; ++i) {
+        h2o_iovec_t link_escaped = h2o_uri_escape(pool, files.entries[i], strlen(files.entries[i]), NULL);
+        link_escaped = h2o_htmlescape(pool, link_escaped.base, link_escaped.len);
+        h2o_iovec_t label_escaped = h2o_htmlescape(pool, files.entries[i], strlen(files.entries[i]));
+?<LI><A HREF="<?= link_escaped ?>"><?= label_escaped ?></A>
     }
 
     return _;

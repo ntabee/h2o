@@ -29,6 +29,22 @@ struct proxy_configurator_t {
     h2o_proxy_config_vars_t _vars_stack[H2O_CONFIGURATOR_NUM_LEVELS + 1];
 };
 
+static int on_config_websocket_timeout(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
+{
+    struct proxy_configurator_t *self = (void *)cmd->configurator;
+    return h2o_configurator_scanf(cmd, node, "%" PRIu64, &self->vars->websocket.timeout);
+}
+
+static int on_config_websocket(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
+{
+    struct proxy_configurator_t *self = (void *)cmd->configurator;
+    ssize_t ret = h2o_configurator_get_one_of(cmd, node, "OFF,ON");
+    if (ret == -1)
+        return -1;
+    self->vars->websocket.enabled = (int)ret;
+    return 0;
+}
+
 static int on_config_timeout_io(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
 {
     struct proxy_configurator_t *self = (void *)cmd->configurator;
@@ -54,28 +70,20 @@ static int on_config_preserve_host(h2o_configurator_command_t *cmd, h2o_configur
 static int on_config_reverse_url(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
 {
     struct proxy_configurator_t *self = (void *)cmd->configurator;
-    h2o_mem_pool_t pool;
     h2o_url_t parsed;
-
-    h2o_mem_init_pool(&pool);
 
     if (h2o_url_parse(node->data.scalar, SIZE_MAX, &parsed) != 0) {
         h2o_configurator_errprintf(cmd, node, "failed to parse URL: %s\n", node->data.scalar);
-        goto ErrExit;
+        return -1;
     }
     if (parsed.scheme != &H2O_URL_SCHEME_HTTP) {
         h2o_configurator_errprintf(cmd, node, "only HTTP URLs are supported");
-        goto ErrExit;
+        return -1;
     }
     /* register */
     h2o_proxy_register_reverse_proxy(ctx->pathconf, &parsed, self->vars);
 
-    h2o_mem_clear_pool(&pool);
     return 0;
-
-ErrExit:
-    h2o_mem_clear_pool(&pool);
-    return -1;
 }
 
 static int on_config_enter(h2o_configurator_t *_self, h2o_configurator_context_t *ctx, yoml_t *node)
@@ -108,6 +116,8 @@ void h2o_proxy_register_configurator(h2o_globalconf_t *conf)
     c->vars = c->_vars_stack;
     c->vars->io_timeout = H2O_DEFAULT_PROXY_IO_TIMEOUT;
     c->vars->keepalive_timeout = 2000;
+    c->vars->websocket.enabled = 0; /* have websocket proxying disabled by default; until it becomes non-experimental */
+    c->vars->websocket.timeout = H2O_DEFAULT_PROXY_WEBSOCKET_TIMEOUT;
 
     /* setup handlers */
     c->super.enter = on_config_enter;
@@ -123,4 +133,9 @@ void h2o_proxy_register_configurator(h2o_globalconf_t *conf)
     h2o_configurator_define_command(&c->super, "proxy.timeout.keepalive",
                                     H2O_CONFIGURATOR_FLAG_ALL_LEVELS | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR,
                                     on_config_timeout_keepalive);
+    h2o_configurator_define_command(&c->super, "proxy.websocket",
+                                    H2O_CONFIGURATOR_FLAG_ALL_LEVELS | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR, on_config_websocket);
+    h2o_configurator_define_command(&c->super, "proxy.websocket.timeout",
+                                    H2O_CONFIGURATOR_FLAG_ALL_LEVELS | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR,
+                                    on_config_websocket_timeout);
 }

@@ -99,7 +99,7 @@ static void check_flatten(h2o_hpack_header_table_t *header_table, h2o_res_t *res
     const char *err_desc;
 
     h2o_buffer_init(&buf, &h2o_socket_buffer_prototype);
-    h2o_hpack_flatten_response(&buf, header_table, 1, H2O_HTTP2_SETTINGS_DEFAULT.max_frame_size, res, NULL, NULL);
+    h2o_hpack_flatten_response(&buf, header_table, 1, H2O_HTTP2_SETTINGS_DEFAULT.max_frame_size, res, NULL, NULL, SIZE_MAX);
 
     ok(h2o_http2_decode_frame(&frame, (uint8_t *)buf->bytes, buf->size, &H2O_HTTP2_SETTINGS_DEFAULT, &err_desc) > 0);
     ok(h2o_memis(frame.payload, frame.length, expected, expected_len));
@@ -411,8 +411,81 @@ static void test_hpack_push(void)
     h2o_mem_clear_pool(&req.pool);
 }
 
+static void test_hpack_dynamic_table(void)
+{
+    h2o_hpack_header_table_t header_table;
+    uint8_t encoded[256], *p;
+    h2o_iovec_t n, v;
+
+    memset(&header_table, 0, sizeof(header_table));
+    header_table.hpack_capacity = 4096;
+
+    p = encoded;
+    /* expected: literal header with incremental indexing (name not indexed) */
+    n = h2o_iovec_init(H2O_STRLIT("x-name"));
+    v = h2o_iovec_init(H2O_STRLIT("v1"));
+    p = encode_header(&header_table, p, &n, &v);
+    /* expected: literal header with incremental indexing (name indexed) */
+    v = h2o_iovec_init(H2O_STRLIT("v2"));
+    p = encode_header(&header_table, p, &n, &v);
+    /* expected: literal header with incremental indexing (name indexed, referring to the name associated with v2) */
+    v = h2o_iovec_init(H2O_STRLIT("v3"));
+    p = encode_header(&header_table, p, &n, &v);
+    /* expected: indexed header field */
+    v = h2o_iovec_init(H2O_STRLIT("v1"));
+    p = encode_header(&header_table, p, &n, &v);
+
+    const h2o_iovec_t expected = h2o_iovec_init(
+        H2O_STRLIT("\x40\x85"             /* literal header with incremental indexing (name not indexed, 5 bytes, huffman coded) */
+                   "\xf2\xb5\x43\xa4\xbf" /* "x-name" */
+                   "\x02"                 /* value not compressed, 2 bytes */
+                   "v1"                   /* "v1" */
+                   "\x7e"                 /* literal header with incremental indexing (name indexed) */
+                   "\x02"                 /* value not compressed, 2 bytes */
+                   "v2"                   /* "v2" */
+                   "\x7e"                 /* literal header with incremental indexing (name indexed, referring to the last entry) */
+                   "\x02"                 /* value not compressed, 2 bytes */
+                   "v3"                   /* "v3" */
+                   "\xc0"                 /* indexed header field */
+                   ));
+    ok(p - encoded == expected.len);
+    ok(memcmp(encoded, expected.base, expected.len) == 0);
+}
+
+void test_token_wo_hpack_id(void)
+{
+    h2o_mem_pool_t pool;
+    h2o_mem_init_pool(&pool);
+    h2o_hpack_header_table_t table = {};
+    table.hpack_capacity = 4096;
+    h2o_res_t res = {};
+    h2o_buffer_t *buf;
+    h2o_buffer_init(&buf, &h2o_socket_buffer_prototype);
+
+    res.status = 200;
+    res.reason = "OK";
+    h2o_add_header(&pool, &res.headers, H2O_TOKEN_TE, H2O_STRLIT("test"));
+
+    h2o_hpack_flatten_response(&buf, &table, 1, H2O_HTTP2_SETTINGS_DEFAULT.max_frame_size, &res, NULL, NULL, SIZE_MAX);
+    ok(h2o_memis(buf->bytes + 9, buf->size - 9, H2O_STRLIT("\x88"     /* :status:200 */
+                                                           "\x40\x02" /* literal header w. incremental indexing, raw, TE */
+                                                           "te"
+                                                           "\x83" /* header value, huffman */
+                                                           "IP\x9f" /* test */)));
+    h2o_buffer_consume(&buf, buf->size);
+    h2o_hpack_flatten_response(&buf, &table, 1, H2O_HTTP2_SETTINGS_DEFAULT.max_frame_size, &res, NULL, NULL, SIZE_MAX);
+    ok(h2o_memis(buf->bytes + 9, buf->size - 9, H2O_STRLIT("\x88" /* :status:200 */
+                                                           "\xbe" /* te: test, indexed */)));
+
+    h2o_buffer_dispose(&buf);
+    h2o_hpack_dispose_header_table(&table);
+    h2o_mem_clear_pool(&pool);
+}
+
 void test_lib__http2__hpack(void)
 {
     subtest("hpack", test_hpack);
     subtest("hpack-push", test_hpack_push);
+    subtest("hpack-dynamic-table", test_hpack_dynamic_table);
+    subtest("token-wo-hpack-id", test_token_wo_hpack_id);
 }

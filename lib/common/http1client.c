@@ -108,7 +108,6 @@ static void on_body_until_close(h2o_socket_t *sock, int status)
             close_client(client);
             return;
         }
-        h2o_buffer_consume(&sock->input, sock->input->size);
     }
 
     h2o_timeout_link(client->super.ctx->loop, client->super.ctx->io_timeout, &client->_timeout);
@@ -480,4 +479,13 @@ void h2o_http1client_cancel(h2o_http1client_t *_client)
     struct st_h2o_http1client_private_t *client = (void *)_client;
     client->_can_keepalive = 0;
     close_client(client);
+}
+
+h2o_socket_t *h2o_http1client_steal_socket(h2o_http1client_t *_client)
+{
+    struct st_h2o_http1client_private_t *client = (void *)_client;
+    h2o_socket_t *sock = client->super.sock;
+    h2o_socket_read_stop(sock);
+    client->super.sock = NULL;
+    return sock;
 }

@@ -290,7 +290,7 @@ static int update_tickets(session_ticket_vector_t *tickets, uint64_t now)
         uint64_t not_before = has_valid_ticket ? now + 60 : now;
         struct st_session_ticket_t *ticket = new_ticket(conf.ticket.vars.generating.cipher, conf.ticket.vars.generating.md,
                                                         not_before, not_before + conf.lifetime - 1, 1);
-        h2o_vector_reserve(NULL, (void *)tickets, sizeof(tickets->entries[0]), tickets->size + 1);
+        h2o_vector_reserve(NULL, tickets, tickets->size + 1);
         memmove(tickets->entries + 1, tickets->entries, sizeof(tickets->entries[0]) * tickets->size);
         ++tickets->size;
         tickets->entries[0] = ticket;
@@ -444,7 +444,7 @@ static int parse_tickets(session_ticket_vector_t *tickets, const void *src, size
             sprintf(errstr, "at element index %zu:%s\n", i, errbuf);
             goto Error;
         }
-        h2o_vector_reserve(NULL, (void *)tickets, sizeof(tickets->entries[0]), tickets->size + 1);
+        h2o_vector_reserve(NULL, tickets, tickets->size + 1);
         tickets->entries[tickets->size++] = ticket;
     }
 
@@ -511,7 +511,8 @@ static int ticket_memcached_update_tickets(yrmcds *conn, h2o_iovec_t key, time_t
             goto Exit;
         }
     }
-    qsort(tickets.entries, tickets.size, sizeof(tickets.entries[0]), ticket_sort_compare);
+    if (tickets.size > 1)
+        qsort(tickets.entries, tickets.size, sizeof(tickets.entries[0]), ticket_sort_compare);
 
     /* if we need to update the tickets, atomically update the value in memcached, and request refetch to the caller */
     if (update_tickets(&tickets, now) != 0) {
@@ -543,6 +544,7 @@ static int ticket_memcached_update_tickets(yrmcds *conn, h2o_iovec_t key, time_t
     pthread_rwlock_unlock(&session_tickets.rwlock);
 
 Exit:
+    free(tickets_serialized.base);
     free_tickets(&tickets);
     return retry;
 }
@@ -592,7 +594,8 @@ static int load_tickets_file(const char *fn)
         goto Exit;
     }
     /* sort the ticket entries being read */
-    qsort(tickets.entries, tickets.size, sizeof(tickets.entries[0]), ticket_sort_compare);
+    if (tickets.size > 1)
+        qsort(tickets.entries, tickets.size, sizeof(tickets.entries[0]), ticket_sort_compare);
     /* replace the ticket list */
     pthread_rwlock_wrlock(&session_tickets.rwlock);
     h2o_mem_swap(&session_tickets.tickets, &tickets, sizeof(tickets));
@@ -647,7 +650,7 @@ int ssl_session_resumption_on_config(h2o_configurator_command_t *cmd, h2o_config
         MODE_CACHE = 1,
         MODE_TICKET = 2,
     };
-    int modes = -1;
+    int modes = -1, uses_memcached;
     yoml_t *t;
 
     if ((t = yoml_get(node, "mode")) == NULL) {
@@ -776,6 +779,8 @@ int ssl_session_resumption_on_config(h2o_configurator_command_t *cmd, h2o_config
             cmd, mode, "ticket-based session resumption cannot be used, the server is built without support for the feature");
         return -1;
 #endif
+    } else {
+        conf.ticket.update_thread = NULL;
     }
 
     if ((t = yoml_get(node, "memcached")) != NULL) {
@@ -813,11 +818,11 @@ int ssl_session_resumption_on_config(h2o_configurator_command_t *cmd, h2o_config
         }
     }
 
-    if (conf.memcached.host == NULL && (conf.cache.setup == setup_cache_memcached
+    uses_memcached = conf.cache.setup == setup_cache_memcached;
 #if H2O_USE_SESSION_TICKETS
-                                        || conf.ticket.update_thread == ticket_memcached_updater
+    uses_memcached = (uses_memcached || conf.ticket.update_thread == ticket_memcached_updater);
 #endif
-                                        )) {
+    if (uses_memcached && conf.memcached.host == NULL) {
         h2o_configurator_errprintf(cmd, node, "configuration of memcached is missing");
         return -1;
     }

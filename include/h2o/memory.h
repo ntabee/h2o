@@ -244,6 +244,7 @@ static void h2o_buffer_set_prototype(h2o_buffer_t **buffer, h2o_buffer_prototype
  * after it is linked.
  */
 static void h2o_buffer_link_to_pool(h2o_buffer_t *buffer, h2o_mem_pool_t *pool);
+void h2o_buffer__dispose_linked(void *p);
 /**
  * grows the vector so that it could store at least new_capacity elements of given size (or dies if impossible).
  * @param pool memory pool that the vector is using
@@ -251,7 +252,9 @@ static void h2o_buffer_link_to_pool(h2o_buffer_t *buffer, h2o_mem_pool_t *pool);
  * @param element_size size of the elements stored in the vector
  * @param new_capacity the capacity of the buffer after the function returns
  */
-static void h2o_vector_reserve(h2o_mem_pool_t *pool, h2o_vector_t *vector, size_t element_size, size_t new_capacity);
+#define h2o_vector_reserve(pool, vector, new_capacity)                                                                             \
+    h2o_vector__reserve((pool), (h2o_vector_t *)(void *)(vector), sizeof((vector)->entries[0]), (new_capacity))
+static void h2o_vector__reserve(h2o_mem_pool_t *pool, h2o_vector_t *vector, size_t element_size, size_t new_capacity);
 void h2o_vector__expand(h2o_mem_pool_t *pool, h2o_vector_t *vector, size_t element_size, size_t new_capacity);
 
 /**
@@ -350,11 +353,11 @@ inline void h2o_buffer_set_prototype(h2o_buffer_t **buffer, h2o_buffer_prototype
 
 inline void h2o_buffer_link_to_pool(h2o_buffer_t *buffer, h2o_mem_pool_t *pool)
 {
-    h2o_buffer_t **slot = (h2o_buffer_t **)h2o_mem_alloc_shared(pool, sizeof(*slot), (void (*)(void *))(void *)h2o_buffer_dispose);
+    h2o_buffer_t **slot = (h2o_buffer_t **)h2o_mem_alloc_shared(pool, sizeof(*slot), h2o_buffer__dispose_linked);
     *slot = buffer;
 }
 
-inline void h2o_vector_reserve(h2o_mem_pool_t *pool, h2o_vector_t *vector, size_t element_size, size_t new_capacity)
+inline void h2o_vector__reserve(h2o_mem_pool_t *pool, h2o_vector_t *vector, size_t element_size, size_t new_capacity)
 {
     if (vector->capacity < new_capacity) {
         h2o_vector__expand(pool, vector, element_size, new_capacity);

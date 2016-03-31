@@ -60,9 +60,7 @@ static int on_req(h2o_handler_t *_self, h2o_req_t *req)
 
     /* request reprocess */
     h2o_reprocess_request(req, req->method, scheme, *authority,
-                          h2o_concat(&req->pool, self->upstream.path, h2o_iovec_init(req->path.base + req->pathconf->path.len,
-                                                                                     req->path.len - req->pathconf->path.len)),
-                          overrides, 0);
+                          h2o_build_destination(req, self->upstream.path.base, self->upstream.path.len), overrides, 0);
 
     return 0;
 }
@@ -75,15 +73,26 @@ static void on_context_init(h2o_handler_t *_self, h2o_context_t *ctx)
     if (self->sockpool != NULL && self->sockpool->timeout == UINT64_MAX)
         h2o_socketpool_set_timeout(self->sockpool, ctx->loop, self->config.keepalive_timeout);
 
-    /* setup a specific client context if io timeout is different */
-    if (ctx->globalconf->proxy.io_timeout == self->config.io_timeout)
+    /* setup a specific client context only if we need to */
+    if (ctx->globalconf->proxy.io_timeout == self->config.io_timeout && !self->config.websocket.enabled)
         return;
 
-    h2o_http1client_ctx_t *client_ctx = h2o_mem_alloc(sizeof(*ctx) + sizeof(*client_ctx->io_timeout));
+    h2o_http1client_ctx_t *client_ctx = h2o_mem_alloc(sizeof(*ctx));
     client_ctx->loop = ctx->loop;
     client_ctx->getaddr_receiver = &ctx->receivers.hostinfo_getaddr;
-    client_ctx->io_timeout = (void *)(client_ctx + 1);
-    h2o_timeout_init(client_ctx->loop, client_ctx->io_timeout, self->config.io_timeout);
+    if (ctx->globalconf->proxy.io_timeout == self->config.io_timeout) {
+        client_ctx->io_timeout = &ctx->proxy.io_timeout;
+    } else {
+        client_ctx->io_timeout = h2o_mem_alloc(sizeof(*client_ctx->io_timeout));
+        h2o_timeout_init(client_ctx->loop, client_ctx->io_timeout, self->config.io_timeout);
+    }
+    if (self->config.websocket.enabled) {
+        /* FIXME avoid creating h2o_timeout_t for every path-level context in case the timeout values are the same */
+        client_ctx->websocket_timeout = h2o_mem_alloc(sizeof(*client_ctx->websocket_timeout));
+        h2o_timeout_init(client_ctx->loop, client_ctx->websocket_timeout, self->config.websocket.timeout);
+    } else {
+        client_ctx->websocket_timeout = NULL;
+    }
 
     h2o_context_set_handler_context(ctx, &self->super, client_ctx);
 }
@@ -96,7 +105,14 @@ static void on_context_dispose(h2o_handler_t *_self, h2o_context_t *ctx)
     if (client_ctx == NULL)
         return;
 
-    h2o_timeout_dispose(client_ctx->loop, client_ctx->io_timeout);
+    if (client_ctx->io_timeout != &ctx->proxy.io_timeout) {
+        h2o_timeout_dispose(client_ctx->loop, client_ctx->io_timeout);
+        free(client_ctx->io_timeout);
+    }
+    if (client_ctx->websocket_timeout != NULL) {
+        h2o_timeout_dispose(client_ctx->loop, client_ctx->websocket_timeout);
+        free(client_ctx->websocket_timeout);
+    }
     free(client_ctx);
 }
 
@@ -110,8 +126,6 @@ static void on_handler_dispose(h2o_handler_t *_self)
         h2o_socketpool_dispose(self->sockpool);
         free(self->sockpool);
     }
-
-    free(self);
 }
 
 #ifdef H2O_TILE

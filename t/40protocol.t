@@ -21,16 +21,14 @@ my $port = $server->{port};
 my $tls_port = $server->{tls_port};
 
 subtest 'curl' => sub {
-    plan skip_all => 'curl not found'
-        unless prog_exists('curl');
-    for my $file (sort keys %files) {
-        my $content = `curl --silent --show-error http://127.0.0.1:$port/$file`;
-        is length($content), $files{$file}->{size}, "http://127.0.0.1/$file (size)";
-        is md5_hex($content), $files{$file}->{md5}, "http://127.0.0.1/$file (md5)";
-        $content = `curl --silent --show-error --insecure https://127.0.0.1:$tls_port/$file`;
-        is length($content), $files{$file}->{size}, "http://127.0.0.1/$file (size)";
-        is md5_hex($content), $files{$file}->{md5}, "https://127.0.0.1/$file (md5)";
-    }
+    run_with_curl($server, sub {
+        my ($proto, $port, $curl) = @_;
+        for my $file (sort keys %files) {
+            my $content = `$curl --silent --show-error $proto://127.0.0.1:$port/$file`;
+            is length($content), $files{$file}->{size}, "$file (size)";
+            is md5_hex($content), $files{$file}->{md5}, "$file (md5)";
+        }
+    });
 };
 
 subtest 'nghttp' => sub {
@@ -59,7 +57,7 @@ subtest 'ab' => sub {
     plan skip_all => 'ab not found'
         unless prog_exists('ab');
     ok(system("ab -c 10 -n 10000 -k http://127.0.0.1:$port/index.txt") == 0);
-    ok(system("ab -c 10 -n 10000 -k https://127.0.0.1:$tls_port/index.txt") == 0);
+    ok(system("ab -f tls1 -c 10 -n 10000 -k https://127.0.0.1:$tls_port/index.txt") == 0);
 };
 
 done_testing;

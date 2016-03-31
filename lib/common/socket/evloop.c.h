@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 DeNA Co., Ltd.
+ * Copyright (c) 2014-2016 DeNA Co., Ltd., Kazuho Oku
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -27,6 +27,16 @@
 #include <unistd.h>
 #include "cloexec.h"
 #include "h2o/linklist.h"
+
+#if !defined(H2O_USE_ACCEPT4)
+#ifdef __linux__
+#define H2O_USE_ACCEPT4 1
+#elif __FreeBSD__ >= 10
+#define H2O_USE_ACCEPT4 1
+#else
+#define H2O_USE_ACCEPT4 0
+#endif
+#endif
 
 struct st_h2o_evloop_socket_t {
     h2o_socket_t super;
@@ -82,8 +92,11 @@ static void evloop_do_on_socket_export(struct st_h2o_evloop_socket_t *sock);
 void link_to_pending(struct st_h2o_evloop_socket_t *sock)
 {
     if (sock->_next_pending == sock) {
-        sock->_next_pending = sock->loop->_pending;
-        sock->loop->_pending = sock;
+        struct st_h2o_evloop_socket_t **slot = (sock->_flags & H2O_SOCKET_FLAG_IS_ACCEPTED_CONNECTION) != 0
+                                                   ? &sock->loop->_pending_as_server
+                                                   : &sock->loop->_pending_as_client;
+        sock->_next_pending = *slot;
+        *slot = sock;
     }
 }
 
@@ -107,7 +120,7 @@ static int on_read_core(int fd, h2o_buffer_t **input)
             /* memory allocation failed */
             return -1;
         }
-        while ((rret = read(fd, buf.base, buf.len)) == -1 && errno == EINTR)
+        while ((rret = read(fd, buf.base, buf.len <= INT_MAX / 2 ? buf.len : INT_MAX / 2 + 1)) == -1 && errno == EINTR)
             ;
         if (rret == -1) {
             if (errno == EAGAIN)
@@ -378,7 +391,7 @@ h2o_socket_t *h2o_evloop_socket_accept(h2o_socket_t *_listener)
     struct st_h2o_evloop_socket_t *listener = (struct st_h2o_evloop_socket_t *)_listener;
     int fd;
 
-#ifdef __linux__
+#if H2O_USE_ACCEPT4
     if ((fd = accept4(listener->fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC)) == -1)
         return NULL;
 #else
@@ -387,7 +400,7 @@ h2o_socket_t *h2o_evloop_socket_accept(h2o_socket_t *_listener)
     fcntl(fd, F_SETFL, O_NONBLOCK);
 #endif
 
-    return &create_socket_set_nodelay(listener->loop, fd, 0)->super;
+    return &create_socket_set_nodelay(listener->loop, fd, H2O_SOCKET_FLAG_IS_ACCEPTED_CONNECTION)->super;
 }
 
 h2o_socket_t *h2o_socket_connect(h2o_loop_t *loop, struct sockaddr *addr, socklen_t addrlen, h2o_socket_cb cb)
@@ -457,6 +470,7 @@ static void run_socket(struct st_h2o_evloop_socket_t *sock)
         int status;
         if ((sock->_flags & H2O_SOCKET_FLAG_IS_CONNECTING) != 0) {
             socklen_t l = sizeof(status);
+            status = 0;
             getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &status, &l);
             sock->_flags &= ~H2O_SOCKET_FLAG_IS_CONNECTING;
         } else {
@@ -473,12 +487,19 @@ static void run_socket(struct st_h2o_evloop_socket_t *sock)
 
 static void run_pending(h2o_evloop_t *loop)
 {
-    while (loop->_pending != NULL) {
-        /* detach the first sock and run */
-        struct st_h2o_evloop_socket_t *sock = loop->_pending;
-        loop->_pending = sock->_next_pending;
-        sock->_next_pending = sock;
-        run_socket(sock);
+    struct st_h2o_evloop_socket_t *sock;
+
+    while (loop->_pending_as_server != NULL || loop->_pending_as_client != NULL) {
+        while ((sock = loop->_pending_as_client) != NULL) {
+            loop->_pending_as_client = sock->_next_pending;
+            sock->_next_pending = sock;
+            run_socket(sock);
+        }
+        if ((sock = loop->_pending_as_server) != NULL) {
+            loop->_pending_as_server = sock->_next_pending;
+            sock->_next_pending = sock;
+            run_socket(sock);
+        }
     }
 }
 
@@ -498,7 +519,9 @@ int h2o_evloop_run(h2o_evloop_t *loop)
         h2o_timeout_t *timeout = H2O_STRUCT_FROM_MEMBER(h2o_timeout_t, _link, node);
         h2o_timeout_run(loop, timeout, loop->_now);
     }
-    assert(loop->_pending == NULL); /* h2o_timeout_run calls run_pending */
+    /* assert h2o_timeout_run has called run_pending */
+    assert(loop->_pending_as_client == NULL);
+    assert(loop->_pending_as_server == NULL);
 
     return 0;
 }

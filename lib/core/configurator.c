@@ -168,14 +168,14 @@ int h2o_configurator_apply_commands(h2o_configurator_context_t *ctx, yoml_t *nod
         }
         /* handle the command (or keep it for later execution) */
         if ((cmd->flags & H2O_CONFIGURATOR_FLAG_SEMI_DEFERRED) != 0) {
-            h2o_vector_reserve(NULL, (void *)&semi_deferred, sizeof(semi_deferred.entries[0]), semi_deferred.size + 1);
+            h2o_vector_reserve(NULL, &semi_deferred, semi_deferred.size + 1);
             semi_deferred.entries[semi_deferred.size++] = (struct st_cmd_value_t){cmd, value};
         } else if ((cmd->flags & H2O_CONFIGURATOR_FLAG_DEFERRED) != 0) {
-            h2o_vector_reserve(NULL, (void *)&deferred, sizeof(deferred.entries[0]), deferred.size + 1);
+            h2o_vector_reserve(NULL, &deferred, deferred.size + 1);
             deferred.entries[deferred.size++] = (struct st_cmd_value_t){cmd, value};
         } else {
             if (cmd->cb(cmd, ctx, value) != 0)
-                return -1;
+                goto Exit;
         }
     SkipCommand:
         ;
@@ -232,7 +232,7 @@ static int on_config_paths(h2o_configurator_command_t *cmd, h2o_configurator_con
         yoml_t *key = node->data.mapping.elements[i].key;
         yoml_t *value = node->data.mapping.elements[i].value;
         h2o_configurator_context_t path_ctx = *ctx;
-        path_ctx.pathconf = h2o_config_register_path(path_ctx.hostconf, key->data.scalar);
+        path_ctx.pathconf = h2o_config_register_path(path_ctx.hostconf, key->data.scalar, 0);
         path_ctx.mimemap = &path_ctx.pathconf->mimemap;
         path_ctx.parent = ctx;
         if (h2o_configurator_apply_commands(&path_ctx, value, H2O_CONFIGURATOR_FLAG_PATH, NULL) != 0)
@@ -264,8 +264,17 @@ static int on_config_hosts(h2o_configurator_command_t *cmd, h2o_configurator_con
             h2o_configurator_errprintf(cmd, key, "invalid key (must be either `host` or `host:port`)");
             return -1;
         }
+        assert(hostname.len != 0);
+        if ((hostname.base[0] == '*' && !(hostname.len == 1 || hostname.base[1] == '.')) ||
+            memchr(hostname.base + 1, '*', hostname.len - 1) != NULL) {
+            h2o_configurator_errprintf(cmd, key, "wildcard (*) can only be used at the start of the hostname");
+            return -1;
+        }
         h2o_configurator_context_t host_ctx = *ctx;
-        host_ctx.hostconf = h2o_config_register_host(host_ctx.globalconf, hostname, port);
+        if ((host_ctx.hostconf = h2o_config_register_host(host_ctx.globalconf, hostname, port)) == NULL) {
+            h2o_configurator_errprintf(cmd, key, "duplicate host entry");
+            return -1;
+        }
         host_ctx.mimemap = &host_ctx.hostconf->mimemap;
         host_ctx.parent = ctx;
         if (h2o_configurator_apply_commands(&host_ctx, value, H2O_CONFIGURATOR_FLAG_HOST, NULL) != 0)
@@ -336,7 +345,7 @@ static int on_config_http2_casper(h2o_configurator_command_t *cmd, h2o_configura
 {
     static const h2o_casper_conf_t defaults = {
         13, /* casper_bits: default (2^13 ~= 100 assets * 1/0.01 collision probability) */
-        0 /* track blocking assets only */
+        0   /* track blocking assets only */
     };
 
     struct st_core_configurator_t *self = (void *)cmd->configurator;
@@ -421,20 +430,58 @@ static int set_mimetypes(h2o_configurator_command_t *cmd, h2o_mimemap_t *mimemap
         case YOML_TYPE_SCALAR:
             if (assert_is_extension(cmd, value) != 0)
                 return -1;
-            h2o_mimemap_define_mimetype(mimemap, value->data.scalar + 1, key->data.scalar);
+            h2o_mimemap_define_mimetype(mimemap, value->data.scalar + 1, key->data.scalar, NULL);
             break;
         case YOML_TYPE_SEQUENCE:
             for (j = 0; j != value->data.sequence.size; ++j) {
                 yoml_t *ext_node = value->data.sequence.elements[j];
                 if (assert_is_extension(cmd, ext_node) != 0)
                     return -1;
-                h2o_mimemap_define_mimetype(mimemap, ext_node->data.scalar + 1, key->data.scalar);
+                h2o_mimemap_define_mimetype(mimemap, ext_node->data.scalar + 1, key->data.scalar, NULL);
             }
             break;
+        case YOML_TYPE_MAPPING: {
+            yoml_t *t;
+            h2o_mime_attributes_t attr;
+            h2o_mimemap_get_default_attributes(key->data.scalar, &attr);
+            if ((t = yoml_get(value, "is_compressible")) != NULL) {
+                if (t->type == YOML_TYPE_SCALAR && strcasecmp(t->data.scalar, "YES") == 0) {
+                    attr.is_compressible = 1;
+                } else if (t->type == YOML_TYPE_SCALAR && strcasecmp(t->data.scalar, "NO") == 0) {
+                    attr.is_compressible = 0;
+                } else {
+                    h2o_configurator_errprintf(cmd, t, "`is_compressible` attribute must be either of: `YES` or `NO`");
+                    return -1;
+                }
+            }
+            if ((t = yoml_get(value, "priority")) != NULL) {
+                if (t->type == YOML_TYPE_SCALAR && strcasecmp(t->data.scalar, "normal") == 0) {
+                    attr.priority = H2O_MIME_ATTRIBUTE_PRIORITY_NORMAL;
+                } else if (t->type == YOML_TYPE_SCALAR && strcasecmp(t->data.scalar, "highest") == 0) {
+                    attr.priority = H2O_MIME_ATTRIBUTE_PRIORITY_HIGHEST;
+                } else {
+                    h2o_configurator_errprintf(cmd, t, "`priority` attribute must be either of: `normal` or `highest`");
+                    return -1;
+                }
+            }
+            if ((t = yoml_get(value, "extensions")) == NULL) {
+                h2o_configurator_errprintf(cmd, value, "cannot find mandatory attribute `extensions`");
+                return -1;
+            }
+            if (t->type != YOML_TYPE_SEQUENCE) {
+                h2o_configurator_errprintf(cmd, t, "`extensions` attribute must be a sequence of scalars");
+                return -1;
+            }
+            for (j = 0; j != t->data.sequence.size; ++j) {
+                yoml_t *ext_node = t->data.sequence.elements[j];
+                if (assert_is_extension(cmd, ext_node) != 0)
+                    return -1;
+                h2o_mimemap_define_mimetype(mimemap, ext_node->data.scalar + 1, key->data.scalar, &attr);
+            }
+        } break;
         default:
-            h2o_configurator_errprintf(cmd, value,
-                                       "only scalar or sequence of scalar is permitted at the value part of the argument");
-            return -1;
+            fprintf(stderr, "logic flaw at %s:%d\n", __FILE__, __LINE__);
+            abort();
         }
     }
 
@@ -445,7 +492,7 @@ static int on_config_mime_settypes(h2o_configurator_command_t *cmd, h2o_configur
 {
     h2o_mimemap_t *newmap = h2o_mimemap_create();
 
-    h2o_mimemap_set_default_type(newmap, h2o_mimemap_get_default_type(*ctx->mimemap)->data.mimetype.base);
+    h2o_mimemap_set_default_type(newmap, h2o_mimemap_get_default_type(*ctx->mimemap)->data.mimetype.base, NULL);
     if (set_mimetypes(cmd, newmap, node) != 0) {
         h2o_mem_release_shared(newmap);
         return -1;
@@ -494,7 +541,7 @@ static int on_config_mime_setdefaulttype(h2o_configurator_command_t *cmd, h2o_co
         return -1;
 
     clone_mimemap_if_clean(ctx);
-    h2o_mimemap_set_default_type(*ctx->mimemap, node->data.scalar);
+    h2o_mimemap_set_default_type(*ctx->mimemap, node->data.scalar, NULL);
 
     return 0;
 }
@@ -536,8 +583,7 @@ static int on_config_custom_handler(h2o_configurator_command_t *cmd, h2o_configu
         exts[i] = NULL;
     } break;
     default:
-        h2o_configurator_errprintf(cmd, ext_node,
-                                   "only scalar or sequence of scalar is permitted at the value part of the argument");
+        h2o_configurator_errprintf(cmd, ext_node, "`extensions` must be a scalar or sequence of scalar");
         return -1;
     }
     clone_mimemap_if_clean(ctx);
@@ -585,6 +631,7 @@ void h2o_configurator__init_core(h2o_globalconf_t *conf)
         c->super.enter = on_core_enter;
         c->super.exit = on_core_exit;
         c->vars = c->_vars_stack;
+        c->vars->http2.reprioritize_blocking_assets = 1; /* defaults to ON */
         h2o_configurator_define_command(&c->super, "limit-request-body",
                                         H2O_CONFIGURATOR_FLAG_GLOBAL | H2O_CONFIGURATOR_FLAG_EXPECT_SCALAR,
                                         on_config_limit_request_body);
@@ -663,8 +710,7 @@ void h2o_configurator_define_command(h2o_configurator_t *configurator, const cha
 {
     h2o_configurator_command_t *cmd;
 
-    h2o_vector_reserve(NULL, (void *)&configurator->commands, sizeof(configurator->commands.entries[0]),
-                       configurator->commands.size + 1);
+    h2o_vector_reserve(NULL, &configurator->commands, configurator->commands.size + 1);
     cmd = configurator->commands.entries + configurator->commands.size++;
     cmd->configurator = configurator;
     cmd->flags = flags;
@@ -779,9 +825,7 @@ char *h2o_configurator_get_cmd_path(const char *cmd)
 
     /* obtain root */
     if ((root = getenv("H2O_ROOT")) == NULL) {
-#ifdef H2O_ROOT
-        root = H2O_ROOT;
-#endif
+        root = H2O_TO_STR(H2O_ROOT);
         if (root == NULL)
             goto ReturnOrig;
     }
