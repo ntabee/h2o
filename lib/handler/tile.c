@@ -39,7 +39,6 @@ static void on_tile_rendered(h2o_req_t *req, const char* content, size_t content
     time_t now;
     time(&now);
     gmtime_r(&now, &last_modified_gmt);
-    time2packed(&last_modified_gmt);
     h2o_time2str_rfc1123(last_modified, &last_modified_gmt);
     if ((flags & H2O_FILE_FLAG_NO_ETAG) != 0) {
         etag_len = 0;
@@ -123,7 +122,7 @@ static int on_req_tile(h2o_handler_t *_self, h2o_req_t *req)
                 This function is already a "custom handler", associating yet another to ".png" files
                 would be highly probably a misconfiguration.
                 */
-                mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
+                mime_type = h2o_mimemap_get_type_by_extension(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
                 switch (mime_type->type) {
                 case H2O_MIMEMAP_TYPE_MIMETYPE:
                     render_tile(req, self->map, rpath, z, x, y, mime_type->data.mimetype.base, mime_type->data.mimetype.len, super->flags, on_tile_rendered);
@@ -160,7 +159,7 @@ Opened:
     }
 
     /* obtain mime type */
-    mime_type = h2o_mimemap_get_type(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
+    mime_type = h2o_mimemap_get_type_by_extension(self->super.mimemap, h2o_get_filext(rpath, rpath_len));
 
     /* return file */
     switch (mime_type->type) {
