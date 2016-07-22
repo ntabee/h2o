@@ -60,6 +60,7 @@ static void store_data(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t *inbufs
             for (i=0; i<32; ++i) {
                 usleep(10);
                 if (rename(self->tmp_tile_path.base, self->local_tile_path.base) == 0) {
+                    goto Cont;
                 }
                 h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to rename the tmp file %s to %s: %s\n", self->tmp_tile_path.base, self->local_tile_path.base, strerror(errno));
             }
@@ -111,7 +112,14 @@ static void store_chunked_data(h2o_ostream_t *_self, h2o_req_t *req, h2o_iovec_t
             close(self->fd);
             goto Cont;
         }
-        write(self->fd, buf, newsz);
+        size_t v = write(self->fd, buf, newsz);
+        if (v != newsz) {
+            h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to write to file %s: %s\n", self->tmp_tile_path.base, strerror(errno));
+            close(self->fd);
+            unlink(self->tmp_tile_path.base);
+            goto Cont;
+        }
+
         close(self->fd);
         if (rename(self->tmp_tile_path.base, self->local_tile_path.base) != 0) {
             h2o_req_log_error(req, "lib/handler/tile-proxy.c", "Failed to rename the tmp file %s to %s: %s\n", self->tmp_tile_path.base, self->local_tile_path.base, strerror(errno));
